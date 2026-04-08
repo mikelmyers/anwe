@@ -133,10 +133,15 @@ The bridge layer lives in `anwe-bridge` and `anwe-python`. Replace `participant`
 ## Documentation
 
 - [`GETTING_STARTED.md`](GETTING_STARTED.md)
+- [`FEATURE_MATRIX.md`](FEATURE_MATRIX.md)
 - [`LANGUAGE_REFERENCE.md`](LANGUAGE_REFERENCE.md)
 - [`EXAMPLES.md`](EXAMPLES.md)
 - [`BRIDGES.md`](BRIDGES.md)
 - [`ROADMAP.md`](ROADMAP.md)
+
+## Verified Surface
+
+The current implementation has a passing workspace test suite with 417 tests. For repo-facing claims about what is supported today, use [`FEATURE_MATRIX.md`](FEATURE_MATRIX.md) as the canonical summary.
 
 ## Notes on Maturity
 

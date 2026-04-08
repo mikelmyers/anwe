@@ -212,3 +212,5 @@ ANWE is not yet a finished or production-ready language. Some repository text st
 - philosophy
 
 This specification is meant to keep those separate and anchor future work in executable behavior.
+
+For a repo-maintained summary of what is currently stable versus experimental, see [`../anwe-runtime/FEATURE_MATRIX.md`](../anwe-runtime/FEATURE_MATRIX.md).
