@@ -1,0 +1,8 @@
+[package]
+name = "anwe-parser"
+version.workspace = true
+edition.workspace = true
+description = "ANWE parser — lexer, AST, and recursive descent parser for .anwe files"
+
+[dependencies]
+anwe-core = { workspace = true }

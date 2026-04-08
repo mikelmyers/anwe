@@ -1,0 +1,224 @@
+-- ─────────────────────────────────────────────────────────
+-- MULTI-MODAL FUSION IN ANWE
+--
+-- Combine vision + text + audio into unified understanding.
+-- Each modality is an agent with its own attention budget.
+-- Fusion happens through signal exchange and convergence.
+--
+-- ANWE's signal metaphor maps directly to sensor fusion:
+--   - Each sensor produces signals with quality + confidence
+--   - Attention prioritizes which modalities to attend to
+--   - Sync aligns signals across modalities
+--   - Convergence produces unified understanding
+--
+-- BUILDSHEET items covered:
+--   [x] Multi-modal fusion (Perception & Sensors)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+agent VisionEncoder attention 0.8 external("callback", "vision") data {
+  model: "clip-vit-large"
+  resolution: "224x224"
+  fps: 30
+  current_frame: "scene with person speaking near whiteboard"
+}
+
+agent AudioEncoder attention 0.7 external("callback", "audio") data {
+  model: "whisper-large-v3"
+  sample_rate: 16000
+  channels: 1
+  current_segment: "explaining quantum entanglement"
+}
+
+agent TextEncoder attention 0.7 external("callback", "text") data {
+  model: "bge-large"
+  source: "slide_ocr"
+  current_text: "Quantum Entanglement: Two particles, one state"
+}
+
+agent FusionEngine attention 0.95 data {
+  modalities_active: 3
+  fusion_strategy: "attention_weighted"
+  alignment_window_ms: 500
+}
+
+agent UnifiedRepresentation data {
+  scene_understanding: ""
+  confidence: 0.0
+  modality_contributions: []
+  temporal_alignment: "unknown"
+}
+
+agent ActionDecider attention 0.9 data {
+  threshold: 0.7
+  action: ""
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 5 within 30000 {
+  VisionEncoder
+  AudioEncoder
+  TextEncoder
+  FusionEngine
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LINKS
+-- ═══════════════════════════════════════════════════════════
+
+-- Vision processing
+link VisionEncoder <-> FusionEngine priority high {
+  >> { quality: attending, priority: 0.85, confidence: 0.8, half_life: 100 }
+     "Processing visual stream"
+
+  connect depth full {
+    signal attending   0.85 between data "visual features extracted"
+    signal recognizing 0.8  inward  data "scene: person + whiteboard + text"
+  }
+
+  VisionEncoder ~ FusionEngine until synchronized
+
+  => when sync_level > 0.6 depth deep {
+    visual_embedding <- "v_emb_2048d"
+    detected_objects <- ["person", "whiteboard", "text", "diagram"]
+    scene_type <- "lecture"
+    visual_confidence <- 0.88
+    gesture <- "pointing_at_diagram"
+  }
+
+  * from apply {
+    stage: "vision"
+    modality: "visual"
+    confidence: 0.88
+  }
+}
+
+-- Audio processing
+link AudioEncoder <-> FusionEngine priority high {
+  >> { quality: attending, priority: 0.8, confidence: 0.75, half_life: 100 }
+     "Processing audio stream"
+
+  connect depth full {
+    signal attending   0.8  between data "audio features extracted"
+    signal recognizing 0.75 inward  data "speech: quantum entanglement explanation"
+  }
+
+  AudioEncoder ~ FusionEngine until synchronized
+
+  => when sync_level > 0.6 depth deep {
+    audio_embedding <- "a_emb_1024d"
+    transcript <- "So quantum entanglement means when two particles become correlated..."
+    speaker_emotion <- "enthusiastic"
+    speech_confidence <- 0.92
+    emphasis_words <- ["entanglement", "correlated", "measurement"]
+  }
+
+  * from apply {
+    stage: "audio"
+    modality: "speech"
+    confidence: 0.92
+  }
+}
+
+-- Text/OCR processing
+link TextEncoder <-> FusionEngine priority normal {
+  >> { quality: recognizing, priority: 0.75, confidence: 0.85, half_life: 150 }
+     "Processing text from slide OCR"
+
+  connect depth full {
+    signal recognizing 0.8  between data "slide text extracted"
+    signal attending   0.75 inward  data "text: Quantum Entanglement header"
+  }
+
+  TextEncoder ~ FusionEngine until synchronized
+
+  => when sync_level > 0.6 depth deep {
+    text_embedding <- "t_emb_1024d"
+    extracted_text <- "Quantum Entanglement: Two particles, one state"
+    key_concepts <- ["quantum_entanglement", "particle_correlation", "state_sharing"]
+    text_confidence <- 0.95
+  }
+
+  * from apply {
+    stage: "text"
+    modality: "ocr"
+    confidence: 0.95
+  }
+}
+
+-- Cross-modal fusion via convergence
+link FusionEngine <-> UnifiedRepresentation priority critical {
+  >> { quality: applying, priority: 0.95, confidence: 0.85, half_life: 200 }
+     "Fusing 3 modalities into unified understanding"
+
+  connect depth deep {
+    signal applying    0.95 between data "attention-weighted fusion"
+    signal recognizing 0.9  inward  data "cross-modal alignment"
+  }
+
+  FusionEngine ~ UnifiedRepresentation until synchronized
+
+  -- Converge signals from all three modalities
+  converge [VisionEncoder, AudioEncoder, TextEncoder] {
+    strategy: "attention_weighted"
+    alignment: "temporal"
+    window_ms: 500
+  }
+
+  => when sync_level > 0.8 depth deep {
+    scene_understanding <- "A lecturer is explaining quantum entanglement while pointing at a whiteboard diagram. The spoken content aligns with the slide text about particle correlation."
+    unified_confidence <- 0.91
+    vision_weight <- 0.30
+    audio_weight <- 0.45
+    text_weight <- 0.25
+    cross_modal_agreement <- 0.93
+    temporal_aligned <- "true"
+    dominant_modality <- "audio"
+  }
+
+  * from apply {
+    stage: "fusion"
+    modalities: 3
+    agreement: 0.93
+  }
+}
+
+-- Action based on fused understanding
+link UnifiedRepresentation <-> ActionDecider priority high {
+  >> { quality: applying, priority: 0.9, confidence: 0.85, half_life: 200 }
+     "Deciding action from unified understanding"
+
+  connect depth deep {
+    signal applying    0.85 between data "evaluating scene for action"
+    signal recognizing 0.8  inward  data "checking decision threshold"
+  }
+
+  UnifiedRepresentation ~ ActionDecider until synchronized
+
+  if UnifiedRepresentation.unified_confidence > 0.7 {
+    => when sync_level > 0.7 depth deep {
+      action <- "generate_real_time_notes"
+      note <- "Topic: Quantum Entanglement — particle correlation and shared quantum states"
+      triggered_by <- "lecture scene with high cross-modal agreement"
+    }
+  } else {
+    => when sync_level > 0.5 depth partial {
+      action <- "continue_observing"
+      reason <- "insufficient cross-modal confidence"
+    }
+  }
+
+  * from apply {
+    stage: "decision"
+    action: "generate_notes"
+  }
+}

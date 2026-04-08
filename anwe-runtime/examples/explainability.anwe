@@ -1,0 +1,141 @@
+-- EXPLAINABILITY TRACE IN ANWE
+-- 4-step loan decision with complete causal trace.
+-- Every commit records provenance via trace_id.
+
+agent Input data {
+  query: "Should we approve this loan?"
+  applicant: "John Doe"
+  amount: "50000"
+}
+
+agent FeatureExtractor attention 0.8 external("callback", "features") data {
+  role: "extract"
+}
+
+agent RiskModel attention 0.7 external("callback", "risk") data {
+  model: "risk-classifier-v2"
+}
+
+agent PolicyChecker attention 0.9 data {
+  policy_version: "v3.1"
+}
+
+agent Decision data {
+  status: "pending"
+}
+
+supervise one_for_one max_restarts 2 within 15000 {
+  permanent FeatureExtractor
+  permanent RiskModel
+}
+
+-- Step 1: Extract features
+link Input <-> FeatureExtractor priority high {
+  >> { quality: attending, priority: 0.95, confidence: 0.9, half_life: 500 }
+     "Step 1: Extract features from loan application"
+
+  connect depth deep {
+    signal attending   0.9  between data "parsing application"
+    signal recognizing 0.85 inward  data "extracting credit, income, DTI"
+  }
+
+  Input ~ FeatureExtractor until resonating
+
+  => when sync_level > 0.7 depth deep {
+    credit_score <- "720"
+    annual_income <- "85000"
+    debt_to_income <- "0.32"
+    extraction_confidence <- "0.95"
+  }
+
+  * from apply {
+    stage: "feature_extraction"
+    trace_id: "loan_2024_001"
+    trace_step: "1"
+  }
+}
+
+-- Step 2: Risk scoring
+link FeatureExtractor <-> RiskModel priority high {
+  >> { quality: recognizing, priority: 0.9, confidence: 0.85, half_life: 500 }
+     "Step 2: Score risk from features"
+
+  connect depth deep {
+    signal recognizing 0.9  between data FeatureExtractor.credit_score
+    signal attending   0.85 between data FeatureExtractor.debt_to_income
+  }
+
+  FeatureExtractor ~ RiskModel until resonating
+
+  <= when confidence <= 0.3 data "REJECTED: extremely high risk"
+
+  => when sync_level > 0.7 depth deep {
+    risk_score <- "0.23"
+    risk_category <- "low_risk"
+    scoring_confidence <- "0.87"
+  }
+
+  * from apply {
+    stage: "risk_scoring"
+    model: "risk-classifier-v2"
+    trace_id: "loan_2024_001"
+    trace_step: "2"
+  }
+}
+
+-- Step 3: Policy check
+link RiskModel <-> PolicyChecker priority normal {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.9, half_life: 500 }
+     "Step 3: Check against lending policy"
+
+  connect depth deep {
+    signal recognizing 0.9  between data RiskModel.risk_score
+    signal attending   0.85 between data RiskModel.risk_category
+  }
+
+  RiskModel ~ PolicyChecker until resonating
+
+  <= when confidence <= 0.3 data "POLICY VIOLATION"
+
+  => when sync_level > 0.7 depth deep {
+    policy_result <- "approved"
+    rule_credit_min <- "passed (720 >= 650)"
+    rule_dti_max <- "passed (0.32 <= 0.43)"
+    policy_confidence <- "0.93"
+  }
+
+  * from apply {
+    stage: "policy_check"
+    policy: "v3.1"
+    trace_id: "loan_2024_001"
+    trace_step: "3"
+  }
+}
+
+-- Step 4: Final decision with explanation
+link PolicyChecker <-> Decision priority low {
+  >> { quality: recognizing, priority: 0.7, confidence: 0.85, half_life: 300 }
+     "Step 4: Assemble decision with trace"
+
+  connect depth full {
+    signal recognizing 0.8 between data "collecting factors"
+  }
+
+  PolicyChecker ~ Decision until synchronized
+
+  => when sync_level > 0.5 depth deep {
+    approved <- "yes"
+    explanation <- "credit 720 (good), DTI 0.32 (ok), risk 0.23 (low), all policy rules passed"
+    features_used <- FeatureExtractor.credit_score
+    risk_used <- RiskModel.risk_score
+    policy_used <- PolicyChecker.policy_result
+    causal_chain <- "Input -> Features -> Risk -> Policy -> Decision"
+  }
+
+  * from apply {
+    stage: "final_decision"
+    decision: "approved"
+    trace_id: "loan_2024_001"
+    trace_step: "4"
+  }
+}

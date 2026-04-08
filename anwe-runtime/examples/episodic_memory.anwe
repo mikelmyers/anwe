@@ -1,0 +1,177 @@
+-- ─────────────────────────────────────────────────────────
+-- EPISODIC MEMORY RETRIEVAL IN ANWE
+--
+-- "What happened last time I saw this pattern?"
+--
+-- ANWE's history is append-only and carries signal quality.
+-- Episodic retrieval queries history by pattern, quality,
+-- and temporal proximity — not just key-value lookup.
+--
+-- What this proves about ANWE:
+--   - history_query — filter past signals by quality/pattern
+--   - recognizing quality triggers episodic recall
+--   - Temporal decay applies to retrieval confidence
+--   - Past encounters inform present attention
+--
+-- BUILDSHEET items covered:
+--   [x] Episodic memory retrieval (Memory & Knowledge)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+-- The AI system with accumulated experience
+agent Reasoner attention 0.9 data {
+  current_query: "Customer complaining about slow response times"
+  domain: "support_escalation"
+}
+
+-- Episodic memory store with past encounters
+agent EpisodicStore attention 0.7 data {
+  total_episodes: 1247
+  oldest_episode: "2025-03-15"
+  recent_window: 90
+  episodes: [
+    "ep_1201: slow response complaint, root cause: DB connection pool exhaustion, resolution: increase pool size, outcome: resolved in 2h",
+    "ep_1189: slow response complaint, root cause: CDN cache miss, resolution: warm cache, outcome: resolved in 30min",
+    "ep_1156: slow response complaint, root cause: model inference queue backup, resolution: scale workers, outcome: resolved in 1h",
+    "ep_1098: performance degradation, root cause: memory leak in preprocessing, resolution: patch + restart, outcome: 4h",
+    "ep_942: customer escalation, root cause: DNS propagation delay, resolution: wait + communicate, outcome: 6h"
+  ]
+}
+
+-- Pattern matcher that finds similar episodes
+agent PatternMatcher attention 0.8 external("callback", "similarity") data {
+  similarity_threshold: 0.7
+  max_results: 5
+  decay_factor: 0.95
+}
+
+-- Recommendation engine
+agent Advisor data {
+  recommendation: ""
+  confidence: 0.0
+  based_on_episodes: []
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 3 within 30000 {
+  Reasoner
+  EpisodicStore
+  PatternMatcher
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LINKS
+-- ═══════════════════════════════════════════════════════════
+
+-- Current situation triggers episodic recall
+link Reasoner <-> EpisodicStore priority high {
+  >> { quality: recognizing, priority: 0.9, confidence: 0.85, half_life: 200 }
+     "This feels familiar — querying episodic memory"
+
+  connect depth deep {
+    signal recognizing 0.9  between data "pattern recognition triggered"
+    signal attending   0.85 inward  data "searching past episodes"
+  }
+
+  Reasoner ~ EpisodicStore until synchronized
+
+  -- Query history by pattern
+  history_query EpisodicStore {
+    pattern: "slow response"
+    quality: recognizing
+    time_window: 365
+    max_results: 5
+    order_by: "relevance"
+    decay_with: half_life 180
+  }
+
+  => when sync_level > 0.7 depth deep {
+    episodes_found <- 3
+    most_similar <- "ep_1201: DB connection pool exhaustion"
+    similarity_score <- 0.92
+    second_match <- "ep_1189: CDN cache miss"
+    second_score <- 0.84
+    third_match <- "ep_1156: model inference queue backup"
+    third_score <- 0.79
+  }
+
+  * from apply {
+    stage: "episodic_recall"
+    episodes_matched: 3
+  }
+}
+
+-- Pattern analysis across retrieved episodes
+link EpisodicStore <-> PatternMatcher priority high {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.8, half_life: 200 }
+     "Analyzing patterns across similar episodes"
+
+  connect depth deep {
+    signal recognizing 0.85 between data "cross-episode analysis"
+    signal questioning 0.8  inward  data "what patterns repeat"
+  }
+
+  EpisodicStore ~ PatternMatcher until synchronized
+
+  each episode in EpisodicStore.episodes {
+    => when sync_level > 0.5 depth partial {
+      analyzing <- episode
+    }
+  }
+
+  => when sync_level > 0.8 depth deep {
+    common_root_causes <- ["infrastructure_saturation", "cache_invalidation", "queue_backup"]
+    most_frequent <- "infrastructure_saturation"
+    avg_resolution_time <- "2.5h"
+    success_rate <- 0.95
+    pattern_confidence <- 0.87
+  }
+
+  * from apply {
+    stage: "pattern_analysis"
+  }
+}
+
+-- Generate recommendation from episodic patterns
+link PatternMatcher <-> Advisor priority high {
+  >> { quality: applying, priority: 0.9, confidence: 0.85, half_life: 300 }
+     "Generating recommendation from past experience"
+
+  connect depth deep {
+    signal applying    0.9  between data "forming recommendation"
+    signal recognizing 0.85 inward  data "weighing past outcomes"
+  }
+
+  PatternMatcher ~ Advisor until synchronized
+
+  if PatternMatcher.pattern_confidence > 0.8 {
+    => when sync_level > 0.7 depth deep {
+      recommendation <- "Check DB connection pools and model inference queues first. In 3 similar past episodes, infrastructure saturation was the root cause 67% of the time. Expected resolution: 1-2 hours."
+      confidence <- 0.87
+      based_on <- "3 similar episodes spanning 6 months"
+      first_action <- "Check connection pool utilization"
+      second_action <- "Check inference queue depth"
+      third_action <- "Check CDN hit rates"
+    }
+  } else {
+    => when sync_level > 0.5 depth partial {
+      recommendation <- "Insufficient episodic evidence. Proceed with standard diagnostic."
+      confidence <- 0.4
+      based_on <- "limited pattern match"
+    }
+  }
+
+  * from apply {
+    stage: "recommendation"
+    confidence: 0.87
+  }
+}

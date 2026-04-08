@@ -1,0 +1,75 @@
+-- MEMORY DEDUPLICATION IN ANWE
+-- Scan memories, identify duplicates, merge and prune.
+
+agent MemoryStore data {
+  memories: ["weather in SF is sunny", "SF weather forecast: sunny", "dinner at 7pm", "weather in SF sunny today"]
+  count: 4
+}
+
+agent DedupEngine attention 0.9 external("callback", "dedup") data {
+  similarity_threshold: 0.8
+}
+
+agent CleanStore data {
+  unique_memories: []
+  removed: 0
+}
+
+link MemoryStore <-> DedupEngine priority high {
+  >> { quality: attending, priority: 0.9, confidence: 0.95, half_life: 200 }
+     "Scanning memory store for duplicates"
+
+  connect depth full {
+    signal attending   0.9  between data "loading memories for dedup"
+    signal recognizing 0.85 inward  data "similarity engine ready"
+  }
+
+  MemoryStore ~ DedupEngine until synchronized
+
+  each memory in MemoryStore.memories {
+    => when sync_level > 0.5 depth partial {
+      scanning <- memory
+    }
+
+    * from apply {
+      stage: "scanning"
+    }
+  }
+
+  => when sync_level > 0.7 depth deep {
+    clusters_found <- 2
+    cluster_1 <- "3 weather-related memories"
+    cluster_2 <- "1 dinner memory"
+    duplicates_found <- 2
+  }
+
+  * from apply {
+    stage: "analysis_complete"
+  }
+}
+
+link DedupEngine <-> CleanStore priority normal {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.9, half_life: 300 }
+     "Deduplicating and merging"
+
+  connect depth deep {
+    signal recognizing 0.9  between data "merge duplicates"
+    signal attending   0.85 inward  data "store cleaned entries"
+  }
+
+  DedupEngine ~ CleanStore until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    merged_weather <- "weather in SF is sunny (consolidated from 3 entries)"
+    kept_dinner <- "dinner at 7pm"
+    total_unique <- 2
+    removed_count <- 2
+    space_saved_pct <- 50
+  }
+
+  * from apply {
+    stage: "dedup_complete"
+    before: 4
+    after: 2
+  }
+}

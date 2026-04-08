@@ -1,0 +1,219 @@
+-- ═══════════════════════════════════════════════════════════
+-- task_queue_v07.anwe — Pure .anwe Task Queue Subsystem
+-- Demonstrates ANWE v0.7: "Make It Think"
+--
+-- This is a COMPLETE task queue processing system written
+-- entirely in .anwe. No Rust. No Python. Just ANWE.
+--
+-- Features used:
+--   v0.6: Block expressions, operators, if/else, f-strings,
+--         HTTP/JSON builtins, agents, links, supervision
+--   v0.7: While loops, for-in loops, map literals,
+--         try/catch, sleep builtin
+-- ═══════════════════════════════════════════════════════════
+
+-- ─── CONFIGURATION ──────────────────────────────────────
+let max_retries = 3
+let batch_size = 5
+let poll_interval_ms = 100
+
+-- ─── TASK DATA STRUCTURES ───────────────────────────────
+-- Map literals for structured task representations
+
+fn make_task(id, name, priority) {
+    {id: id, name: name, priority: priority, status: "pending", retries: 0}
+}
+
+fn make_result(task_id, success, output) {
+    {task_id: task_id, success: success, output: output}
+}
+
+-- ─── QUEUE OPERATIONS ───────────────────────────────────
+-- Pure functions implementing queue logic with loops
+
+fn enqueue_all(queue, tasks) {
+    let result = queue;
+    for task in tasks {
+        let result = append(result, task)
+    };
+    result
+}
+
+fn dequeue_batch(queue, count) {
+    let batch = [];
+    let remaining = [];
+    let i = 0;
+    for item in queue {
+        let batch = if i < count { append(batch, item) } else { batch };
+        let remaining = if i >= count { append(remaining, item) } else { remaining };
+        let i = i + 1
+    };
+    {batch: batch, remaining: remaining}
+}
+
+fn count_by_status(tasks, target_status) {
+    let count = 0;
+    for task in tasks {
+        let count = if task.status == target_status { count + 1 } else { count }
+    };
+    count
+}
+
+fn find_by_priority(tasks, min_priority) {
+    let result = [];
+    for task in tasks {
+        let result = if task.priority >= min_priority {
+            append(result, task)
+        } else { result }
+    };
+    result
+}
+
+-- ─── TASK PROCESSOR ─────────────────────────────────────
+-- Simulates processing with retry logic using while loops
+
+fn process_task(task) {
+    -- Simulate: tasks with even IDs succeed, odd IDs need retries
+    let task_id = task.id;
+    let is_simple = (task_id / 2) == floor(task_id / 2);
+    if is_simple {
+        make_result(task_id, true, f"completed: {task.name}")
+    } else {
+        -- Retry loop with exponential backoff
+        let retries = 0;
+        let success = false;
+        while (retries < max_retries) and (not success) {
+            let retries = retries + 1;
+            -- Simulate: succeed on last retry
+            let success = if retries == max_retries { true } else { false }
+        };
+        if success {
+            make_result(task_id, true, f"completed after {retries} retries: {task.name}")
+        } else {
+            make_result(task_id, false, f"failed after {retries} retries: {task.name}")
+        }
+    }
+}
+
+fn process_batch(batch) {
+    let results = [];
+    for task in batch {
+        let result = try { process_task(task) }
+            catch { make_result(task.id, false, "processing error") };
+        let results = append(results, result)
+    };
+    results
+}
+
+-- ─── RESULT ANALYSIS ────────────────────────────────────
+
+fn summarize_results(results) {
+    let total = len(results);
+    let succeeded = 0;
+    let failed = 0;
+    for r in results {
+        let succeeded = if r.success == true { succeeded + 1 } else { succeeded };
+        let failed = if r.success != true { failed + 1 } else { failed }
+    };
+    {total: total, succeeded: succeeded, failed: failed,
+     success_rate: if total > 0 { succeeded / total } else { 0 }}
+}
+
+fn format_report(summary) {
+    let rate_pct = summary.success_rate * 100;
+    f"Processed {summary.total} tasks: {summary.succeeded} succeeded, {summary.failed} failed ({rate_pct}% success rate)"
+}
+
+-- ─── MAIN PIPELINE ──────────────────────────────────────
+-- Build task queue, process in batches, report results
+
+-- Create tasks
+let tasks = []
+let task_id = 1
+while task_id <= 6 {
+    let priority = if task_id <= 2 { 3 } else { if task_id <= 4 { 2 } else { 1 } };
+    let tasks = append(tasks, make_task(task_id, f"task_{task_id}", priority));
+    let task_id = task_id + 1
+}
+
+-- Enqueue all tasks
+let queue = enqueue_all([], tasks)
+
+-- Find high-priority tasks
+let high_priority = find_by_priority(queue, 3)
+
+-- Process in batches
+let split = dequeue_batch(queue, batch_size)
+let batch_results = process_batch(split.batch)
+let remaining_results = process_batch(split.remaining)
+
+-- Combine all results
+let all_results = batch_results
+for r in remaining_results {
+    let all_results = append(all_results, r)
+}
+
+-- Generate summary report
+let summary = summarize_results(all_results)
+let report = format_report(summary)
+
+-- ─── AGENTS (v0.6 integration) ─────────────────────────
+
+agent QueueManager data {
+    queue_size: 0
+    processed: 0
+    status: "idle"
+}
+
+agent Worker data {
+    current_task: "none"
+    completed: 0
+    errors: 0
+}
+
+agent Reporter data {
+    last_report: "none"
+    report_count: 0
+}
+
+-- ─── SUPERVISION ────────────────────────────────────────
+
+supervise one_for_one max_restarts 3 within 5000 {
+    permanent QueueManager
+    permanent Worker
+    transient Reporter
+}
+
+-- ─── LINKS (agent coordination) ─────────────────────────
+
+link QueueManager <-> Worker {
+    >> f"dispatching {len(tasks)} tasks"
+    connect depth full {
+        signal attending 0.9 outward
+    }
+    QueueManager ~ Worker until synchronized
+    think {
+        queue_size <- len(tasks)
+        status <- "processing"
+    }
+    => when sync_level > 0.5 depth full {
+        current_task <- "batch_processing"
+    }
+    * from apply { source: "task_dispatch" }
+}
+
+link Worker <-> Reporter {
+    >> f"reporting: {report}"
+    connect depth deep {
+        signal completing 0.85 outward
+    }
+    Worker ~ Reporter until synchronized
+    think {
+        completed <- len(all_results)
+        last_report <- report
+    }
+    => when sync_level > 0.5 depth deep {
+        report_count <- 1
+    }
+    * from apply { source: "result_reporting" }
+}

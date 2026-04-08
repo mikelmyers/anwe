@@ -1,0 +1,228 @@
+-- ─────────────────────────────────────────────────────────
+-- TEMPORAL ALIGNMENT IN ANWE
+--
+-- Sync signals arriving at different rates from different
+-- sources. Audio at 16kHz, video at 30fps, text at variable
+-- intervals — all must be aligned to the same temporal frame.
+--
+-- ANWE's sync and tick system provides the foundation.
+-- Temporal alignment adds rate adaptation and buffering.
+--
+-- BUILDSHEET items covered:
+--   [x] Temporal alignment (Perception & Sensors)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+-- Fast sensor: audio at 16kHz
+agent AudioStream attention 0.7 external("callback", "audio") data {
+  sample_rate_hz: 16000
+  buffer_size_ms: 100
+  current_timestamp_ms: 1000
+  latency_ms: 5
+}
+
+-- Medium sensor: video at 30fps
+agent VideoStream attention 0.8 external("callback", "video") data {
+  frame_rate_hz: 30
+  resolution: "1920x1080"
+  current_timestamp_ms: 998
+  latency_ms: 33
+}
+
+-- Slow sensor: NLP at ~2Hz
+agent TextStream attention 0.6 external("callback", "nlp") data {
+  processing_rate_hz: 2
+  current_timestamp_ms: 980
+  latency_ms: 200
+}
+
+-- Temporal alignment engine
+agent TemporalAligner attention 0.95 data {
+  reference_clock_ms: 1000
+  alignment_window_ms: 100
+  interpolation: "linear"
+  max_skew_ms: 50
+}
+
+-- Aligned frame output
+agent AlignedFrame data {
+  timestamp_ms: 0
+  audio_aligned: "false"
+  video_aligned: "false"
+  text_aligned: "false"
+  total_skew_ms: 0
+  quality: "unknown"
+}
+
+-- Alignment metrics
+agent AlignmentMetrics data {
+  frames_aligned: 0
+  frames_dropped: 0
+  avg_skew_ms: 0.0
+  max_skew_ms: 0.0
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 5 within 30000 {
+  TemporalAligner
+  AlignedFrame
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LINKS
+-- ═══════════════════════════════════════════════════════════
+
+-- Buffer and timestamp audio
+link AudioStream <-> TemporalAligner priority high continuous {
+  >> { quality: attending, priority: 0.8, confidence: 0.95, half_life: 30 }
+     "Buffering audio samples for alignment"
+
+  connect depth full {
+    signal attending 0.8 between data "audio buffer"
+  }
+
+  AudioStream ~ TemporalAligner until synchronized
+
+  stream AudioStream rate 16000 {
+    -- Downsample to alignment window rate
+    buffer samples 1600 {
+      => when sync_level > 0.5 depth partial {
+        audio_chunk_ms <- 100
+        audio_timestamp <- AudioStream.current_timestamp_ms
+        audio_latency <- 5
+      }
+    }
+  }
+
+  * from apply {
+    stage: "audio_buffer"
+    buffer_ms: 100
+  }
+}
+
+-- Buffer and timestamp video
+link VideoStream <-> TemporalAligner priority high continuous {
+  >> { quality: attending, priority: 0.85, confidence: 0.9, half_life: 50 }
+     "Buffering video frames for alignment"
+
+  connect depth full {
+    signal attending 0.85 between data "video frame"
+  }
+
+  VideoStream ~ TemporalAligner until synchronized
+
+  stream VideoStream rate 30 {
+    => when sync_level > 0.5 depth partial {
+      video_frame_ms <- 33
+      video_timestamp <- VideoStream.current_timestamp_ms
+      video_latency <- 33
+    }
+  }
+
+  * from apply {
+    stage: "video_buffer"
+    frame_ms: 33
+  }
+}
+
+-- Buffer and timestamp text/NLP
+link TextStream <-> TemporalAligner priority normal continuous {
+  >> { quality: attending, priority: 0.6, confidence: 0.8, half_life: 200 }
+     "Buffering NLP output for alignment"
+
+  connect depth partial {
+    signal attending 0.6 between data "text segment"
+  }
+
+  TextStream ~ TemporalAligner until synchronized
+
+  stream TextStream rate 2 {
+    => when sync_level > 0.4 depth partial {
+      text_segment_ms <- 500
+      text_timestamp <- TextStream.current_timestamp_ms
+      text_latency <- 200
+    }
+  }
+
+  * from apply {
+    stage: "text_buffer"
+    segment_ms: 500
+  }
+}
+
+-- Perform temporal alignment across all streams
+link TemporalAligner <-> AlignedFrame priority critical {
+  >> { quality: applying, priority: 0.95, confidence: 0.9, half_life: 50 }
+     "Aligning signals to common temporal reference"
+
+  connect depth deep {
+    signal applying    0.95 between data "temporal alignment"
+    signal recognizing 0.9  inward  data "skew correction"
+  }
+
+  TemporalAligner ~ AlignedFrame until synchronized
+
+  -- Align all streams to reference clock
+  align [AudioStream, VideoStream, TextStream] to TemporalAligner.reference_clock_ms {
+    window_ms: 100
+    interpolation: "linear"
+    max_acceptable_skew_ms: 50
+  }
+
+  => when sync_level > 0.8 depth deep {
+    timestamp_ms <- 1000
+    audio_aligned <- "true"
+    audio_skew_ms <- 0
+    video_aligned <- "true"
+    video_skew_ms <- 2
+    text_aligned <- "true"
+    text_skew_ms <- 20
+    total_skew_ms <- 22
+    alignment_quality <- "excellent"
+    interpolated_text <- "true"
+  }
+
+  if TemporalAligner.max_skew_ms > 50 {
+    <= when confidence <= 0.3 data "skew too large — dropping frame"
+  }
+
+  * from apply {
+    stage: "aligned_frame"
+    skew_ms: 22
+    quality: "excellent"
+  }
+}
+
+-- Track alignment quality over time
+link AlignedFrame <-> AlignmentMetrics priority low {
+  >> { quality: completing, priority: 0.5, confidence: 0.95, half_life: 500 }
+     "Recording alignment metrics"
+
+  connect depth partial {
+    signal completing 0.5 between data "metrics collection"
+  }
+
+  AlignedFrame ~ AlignmentMetrics until synchronized
+
+  => when sync_level > 0.4 depth partial {
+    frames_aligned <- 300
+    frames_dropped <- 4
+    avg_skew_ms <- 15.3
+    max_skew_ms <- 48
+    alignment_rate <- 0.987
+    dominant_delay_source <- "text_nlp"
+  }
+
+  * from apply {
+    stage: "alignment_metrics"
+  }
+}

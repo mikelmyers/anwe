@@ -1,0 +1,227 @@
+-- ─────────────────────────────────────────────────────────
+-- SERIALIZATION & CROSS-SESSION PERSISTENCE IN ANWE
+--
+-- Save and restore program state, lineage, and history
+-- between program runs. The lineage persists.
+--
+-- ANWE's irreversible history is append-only by nature.
+-- Serialization captures the full becoming of a system
+-- and restores it so the next session continues
+-- from where the last left off.
+--
+-- What this proves about ANWE:
+--   - save — serialize agent state + lineage to disk
+--   - restore — deserialize and resume with full history
+--   - Lineage survives across sessions
+--   - Becoming is preserved, not just data
+--
+-- BUILDSHEET items covered:
+--   [x] Serialization (Language Features)
+--   [x] Cross-session persistence (Memory & Knowledge)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+-- The AI assistant with accumulated personality
+agent Assistant attention 0.9 data {
+  name: "aria"
+  sessions_completed: 47
+  personality_traits: ["curious", "precise", "patient"]
+  knowledge_domains: ["physics", "cooking", "music_theory"]
+  total_interactions: 12400
+  trust_scores: []
+}
+
+-- Long-term memory that persists
+agent Memory attention 0.7 data {
+  episodic_count: 234
+  semantic_count: 1890
+  last_consolidation: "session_46"
+  decay_applied: "true"
+}
+
+-- User model that evolves across sessions
+agent UserModel attention 0.6 data {
+  user_id: "user_0042"
+  preferences: ["detailed_explanations", "analogies", "no_jargon"]
+  interaction_style: "socratic"
+  sessions_together: 23
+  rapport_level: 0.82
+}
+
+-- Serialization manager
+agent Persistence data {
+  storage_path: "/data/anwe/sessions/"
+  format: "anwe_lineage"
+  last_save: ""
+  last_restore: ""
+}
+
+-- Session state
+agent Session data {
+  session_id: "sess_048"
+  started_at: ""
+  restored_from: "sess_047"
+  is_continuation: "true"
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 3 within 30000 {
+  Assistant
+  Memory
+  UserModel
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LINKS
+-- ═══════════════════════════════════════════════════════════
+
+-- Restore state from previous session
+link Persistence <-> Session priority critical {
+  >> { quality: recognizing, priority: 0.98, confidence: 0.95, half_life: 50 }
+     "Restoring lineage from previous session"
+
+  connect depth deep {
+    signal recognizing 0.95 between data "loading saved state"
+    signal attending   0.9  inward  data "deserializing lineage"
+  }
+
+  Persistence ~ Session until synchronized
+
+  -- Restore each agent's accumulated state
+  restore Assistant from "/data/anwe/sessions/sess_047/assistant.lineage" {
+    include: [data, history, becoming]
+    verify_integrity: "true"
+  }
+
+  restore Memory from "/data/anwe/sessions/sess_047/memory.lineage" {
+    include: [data, history, becoming]
+    apply_decay: "true"
+    decay_since: "sess_047"
+  }
+
+  restore UserModel from "/data/anwe/sessions/sess_047/usermodel.lineage" {
+    include: [data, history]
+    verify_integrity: "true"
+  }
+
+  => when sync_level > 0.9 depth deep {
+    restored_agents <- 3
+    assistant_sessions <- 47
+    memory_episodes <- 234
+    user_rapport <- 0.82
+    lineage_intact <- "true"
+    time_since_last <- "6 hours"
+  }
+
+  * from apply {
+    stage: "restore"
+    from_session: "sess_047"
+    agents_restored: 3
+  }
+}
+
+-- Normal session interaction (with full history available)
+link Assistant <-> UserModel priority high {
+  >> { quality: attending, priority: 0.9, confidence: 0.85, half_life: 200 }
+     "Session 48 interaction with restored context"
+
+  connect depth deep {
+    signal attending   0.9  between data "full context from 23 sessions"
+    signal recognizing 0.85 inward  data "user preferences recalled"
+  }
+
+  Assistant ~ UserModel until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    context_depth <- "23 sessions of history"
+    recall_user_pref <- "detailed_explanations, analogies"
+    rapport_applied <- "true"
+    response_style <- "socratic with detailed analogies"
+  }
+
+  * from apply {
+    stage: "interaction"
+    session: 48
+    with_history: "true"
+  }
+}
+
+-- Memory operations during session
+link Assistant <-> Memory priority normal {
+  >> { quality: applying, priority: 0.8, confidence: 0.9, half_life: 300 }
+     "Storing new memories from this session"
+
+  connect depth deep {
+    signal applying    0.85 between data "new interaction data"
+    signal recognizing 0.8  inward  data "integrating with existing memories"
+  }
+
+  Assistant ~ Memory until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    new_episodic <- 3
+    new_semantic <- 7
+    consolidated <- 2
+    total_episodic <- 237
+    total_semantic <- 1897
+  }
+
+  * from apply {
+    stage: "memory_update"
+    new_entries: 10
+  }
+}
+
+-- Save state at session end
+link Session <-> Persistence priority critical {
+  >> { quality: completing, priority: 0.98, confidence: 0.95, half_life: 50 }
+     "Saving full lineage for next session"
+
+  connect depth deep {
+    signal completing  0.95 between data "session ending — serializing"
+    signal recognizing 0.9  inward  data "writing lineage to disk"
+  }
+
+  Session ~ Persistence until synchronized
+
+  -- Save each agent with full lineage
+  save Assistant to "/data/anwe/sessions/sess_048/assistant.lineage" {
+    include: [data, history, becoming]
+    format: "anwe_lineage"
+    compress: "true"
+  }
+
+  save Memory to "/data/anwe/sessions/sess_048/memory.lineage" {
+    include: [data, history, becoming]
+    format: "anwe_lineage"
+    apply_decay_marker: "true"
+  }
+
+  save UserModel to "/data/anwe/sessions/sess_048/usermodel.lineage" {
+    include: [data, history]
+    format: "anwe_lineage"
+  }
+
+  => when sync_level > 0.9 depth deep {
+    agents_saved <- 3
+    total_size_kb <- 847
+    lineage_entries <- 12410
+    next_session <- "sess_049"
+    integrity_verified <- "true"
+  }
+
+  * from apply {
+    stage: "save"
+    session: "sess_048"
+    agents_saved: 3
+  }
+}

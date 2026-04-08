@@ -1,0 +1,214 @@
+-- ─────────────────────────────────────────────────────────
+-- HYPERPARAMETER SEARCH IN ANWE
+--
+-- 3 configs (ConfigA, ConfigB, ConfigC) trained against Dataset.
+-- Comparator collects results via FieldAccess.
+-- Converge picks the winning configuration.
+-- Reject on divergence (loss goes to NaN/inf).
+-- one_for_all supervision.
+--
+-- What this proves about ANWE:
+--   - Parallel exploration via independent links
+--   - FieldAccess aggregates distributed results
+--   - Converge selects best configuration
+--   - Reject as divergence detection
+--   - one_for_all restarts all if one config corrupts state
+--
+-- BUILDSHEET items covered:
+--   [x] Hyperparameter search (ML Training)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+agent Dataset data {
+  name: "CIFAR-10"
+  train_samples: 50000
+  test_samples: 10000
+}
+
+-- Config A: small learning rate, large batch
+agent ConfigA attention 0.8 external("callback", "config_a") data {
+  lr: "0.0001"
+  batch_size: 512
+  optimizer: "SGD"
+  weight_decay: "0.001"
+}
+
+-- Config B: medium learning rate, medium batch
+agent ConfigB attention 0.8 external("callback", "config_b") data {
+  lr: "0.001"
+  batch_size: 128
+  optimizer: "Adam"
+  weight_decay: "0.01"
+}
+
+-- Config C: large learning rate, small batch
+agent ConfigC attention 0.8 external("callback", "config_c") data {
+  lr: "0.01"
+  batch_size: 32
+  optimizer: "AdamW"
+  weight_decay: "0.05"
+}
+
+-- Comparator that selects the winner
+agent Comparator attention 0.5 data {
+  metric: "test_accuracy"
+  method: "grid_search"
+  configs_total: 3
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- one_for_all: restart all if any diverges
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_all max_restarts 3 within 30000 {
+  permanent ConfigA
+  permanent ConfigB
+  permanent ConfigC
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- CONFIG A: Small LR, large batch (conservative)
+-- ═══════════════════════════════════════════════════════════
+
+link Dataset <-> ConfigA priority normal {
+  >> { quality: attending, priority: 0.85, confidence: 0.8, half_life: 400 }
+     "Config A: training with lr=0.0001, batch=512, SGD"
+
+  connect depth deep {
+    signal attending   0.85 between data "training with conservative hyperparameters"
+    signal recognizing 0.8  inward  data "slow but stable convergence expected"
+  }
+
+  Dataset ~ ConfigA until resonating
+
+  -- Reject on divergence
+  <= when confidence <= 0.2 data "Config A diverged — loss is NaN"
+
+  => when sync_level > 0.7 depth deep {
+    config_a_loss <- "0.95"
+    config_a_accuracy <- "0.72"
+    config_a_epochs <- "10"
+    config_a_converged <- "true"
+    config_a_status <- "stable but slow"
+  }
+
+  * from apply {
+    stage: "train"
+    config: "A"
+    accuracy: "0.72"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- CONFIG B: Medium LR, medium batch (balanced)
+-- ═══════════════════════════════════════════════════════════
+
+link Dataset <-> ConfigB priority normal {
+  >> { quality: attending, priority: 0.85, confidence: 0.85, half_life: 400 }
+     "Config B: training with lr=0.001, batch=128, Adam"
+
+  connect depth deep {
+    signal attending   0.88 between data "training with balanced hyperparameters"
+    signal recognizing 0.85 inward  data "good convergence speed expected"
+  }
+
+  Dataset ~ ConfigB until resonating
+
+  <= when confidence <= 0.2 data "Config B diverged — loss is NaN"
+
+  => when sync_level > 0.7 depth deep {
+    config_b_loss <- "0.52"
+    config_b_accuracy <- "0.84"
+    config_b_epochs <- "10"
+    config_b_converged <- "true"
+    config_b_status <- "fast and stable — best candidate"
+  }
+
+  * from apply {
+    stage: "train"
+    config: "B"
+    accuracy: "0.84"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- CONFIG C: Large LR, small batch (aggressive)
+-- ═══════════════════════════════════════════════════════════
+
+link Dataset <-> ConfigC priority normal {
+  >> { quality: attending, priority: 0.85, confidence: 0.7, half_life: 400 }
+     "Config C: training with lr=0.01, batch=32, AdamW"
+
+  connect depth deep {
+    signal attending   0.8  between data "training with aggressive hyperparameters"
+    signal questioning 0.65 inward  data "high learning rate may cause instability"
+    signal disturbed   0.5  inward  data "oscillating loss detected"
+  }
+
+  Dataset ~ ConfigC until resonating
+
+  <= when confidence <= 0.2 data "Config C diverged — loss is NaN"
+
+  => when sync_level > 0.7 depth deep {
+    config_c_loss <- "0.78"
+    config_c_accuracy <- "0.77"
+    config_c_epochs <- "10"
+    config_c_converged <- "true"
+    config_c_status <- "unstable — oscillating loss"
+  }
+
+  * from apply {
+    stage: "train"
+    config: "C"
+    accuracy: "0.77"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- COMPARE: Converge to pick winner
+-- ═══════════════════════════════════════════════════════════
+
+link ConfigB <-> Comparator priority high {
+  >> { quality: recognizing, priority: 0.9, confidence: 0.9, half_life: 200 }
+     "Comparing all configurations to select winner"
+
+  connect depth deep {
+    signal recognizing 0.85 between data "collecting results from all configs"
+  }
+
+  ConfigB ~ Comparator until resonating
+
+  converge ConfigB <<>> Comparator {
+    >> { quality: recognizing, priority: 0.7 }
+       ConfigA.config_a_accuracy
+    >> { quality: recognizing, priority: 0.7 }
+       ConfigC.config_c_accuracy
+  }
+
+  => when sync_level > 0.7 depth deep {
+    accuracy_a <- ConfigA.config_a_accuracy
+    accuracy_b <- ConfigB.config_b_accuracy
+    accuracy_c <- ConfigC.config_c_accuracy
+    winner <- "ConfigB"
+    winner_accuracy <- "0.84"
+    winner_config <- "lr=0.001, batch=128, Adam"
+    ranking <- "B(0.84) > C(0.77) > A(0.72)"
+    recommendation <- "deploy ConfigB, investigate ConfigC instability"
+  }
+
+  * from apply {
+    stage: "compare"
+    winner: "B"
+    accuracy: "0.84"
+  }
+}

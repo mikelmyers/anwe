@@ -1,0 +1,258 @@
+-- ─────────────────────────────────────────────────────────
+-- SENSOR STREAM PROCESSING IN ANWE
+--
+-- Continuous input with real-time attention prioritization.
+-- Sensors produce signals continuously. ANWE's attention
+-- budgets determine what gets processed and what is dropped.
+--
+-- BUILDSHEET items covered:
+--   [x] Sensor stream processing (Perception & Sensors)
+--   [x] Real-time filtering (Perception & Sensors)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+-- IoT temperature sensor (continuous)
+agent TempSensor attention 0.4 external("callback", "temp") data {
+  location: "server_room_a"
+  sample_rate_hz: 10
+  unit: "celsius"
+  normal_range: "18-24"
+}
+
+-- Power consumption sensor (continuous)
+agent PowerSensor attention 0.3 external("callback", "power") data {
+  location: "rack_42"
+  sample_rate_hz: 1
+  unit: "watts"
+  normal_range: "800-1200"
+}
+
+-- Network traffic sensor (high-rate)
+agent NetSensor attention 0.5 external("callback", "network") data {
+  interface: "eth0"
+  sample_rate_hz: 100
+  unit: "packets_per_sec"
+  normal_range: "1000-5000"
+}
+
+-- CPU utilization sensor
+agent CpuSensor attention 0.4 external("callback", "cpu") data {
+  host: "gpu-node-01"
+  sample_rate_hz: 2
+  unit: "percent"
+  normal_range: "20-80"
+}
+
+-- Stream processor with attention budget
+agent StreamProcessor attention 0.9 data {
+  budget_per_tick: 100
+  budget_remaining: 100
+  signals_processed: 0
+  signals_dropped: 0
+  mode: "normal"
+}
+
+-- Priority queue for signals awaiting processing
+agent SignalQueue data {
+  high_priority: []
+  normal_priority: []
+  low_priority: []
+  overflow_count: 0
+}
+
+-- Alert system
+agent AlertSystem data {
+  active_alerts: []
+  suppressed: 0
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 10 within 60000 {
+  StreamProcessor
+  SignalQueue
+  AlertSystem
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- CONTINUOUS STREAM LINKS
+-- ═══════════════════════════════════════════════════════════
+
+-- Temperature stream — continuous processing
+link TempSensor <-> StreamProcessor priority normal continuous {
+  >> { quality: attending, priority: 0.6, confidence: 0.95, half_life: 50 }
+     "Continuous temperature monitoring"
+
+  connect depth partial {
+    signal attending 0.6 between data "temp stream"
+  }
+
+  TempSensor ~ StreamProcessor until synchronized
+
+  -- Process each reading in the stream
+  stream TempSensor rate 10 {
+    -- Filter: only process if outside normal range
+    if reading > 24 {
+      => when sync_level > 0.4 depth deep {
+        value <- reading
+        alert_level <- "warning"
+        anomaly <- "temperature above normal"
+      }
+
+      >> { quality: disturbed, priority: 0.85, confidence: 0.9, half_life: 30 }
+         "Temperature anomaly detected"
+    }
+
+    if reading > 30 {
+      => when sync_level > 0.4 depth deep {
+        value <- reading
+        alert_level <- "critical"
+        anomaly <- "temperature critical"
+      }
+
+      >> { quality: disturbed, priority: 0.98, confidence: 0.95, half_life: 10 }
+         "CRITICAL: Temperature exceeds safety threshold"
+    }
+
+    -- Normal readings: low priority, bulk process
+    if reading >= 18 {
+      if reading <= 24 {
+        * from apply {
+          stage: "normal_reading"
+          value: reading
+        }
+      }
+    }
+  }
+}
+
+-- Network traffic — high-rate, attention-budget filtered
+link NetSensor <-> StreamProcessor priority high continuous {
+  >> { quality: attending, priority: 0.7, confidence: 0.9, half_life: 30 }
+     "High-rate network traffic monitoring"
+
+  connect depth full {
+    signal attending 0.7 between data "network stream"
+  }
+
+  NetSensor ~ StreamProcessor until synchronized
+
+  stream NetSensor rate 100 {
+    -- Backpressure: when budget exhausted, drop low-priority signals
+    if StreamProcessor.budget_remaining <= 0 {
+      <= when confidence <= 0.1 data "attention budget exhausted — dropping signal"
+    }
+
+    -- Spike detection
+    if reading > 5000 {
+      => when sync_level > 0.5 depth deep {
+        value <- reading
+        alert_level <- "high"
+        anomaly <- "traffic spike"
+        possible_cause <- "DDoS or flash crowd"
+      }
+    }
+
+    -- Normal traffic: sample 1 in 10
+    * from apply {
+      stage: "traffic_sample"
+      sampled: "true"
+    }
+  }
+}
+
+-- Power monitoring
+link PowerSensor <-> StreamProcessor priority normal continuous {
+  >> { quality: attending, priority: 0.5, confidence: 0.95, half_life: 100 }
+     "Power consumption monitoring"
+
+  connect depth partial {
+    signal attending 0.5 between data "power stream"
+  }
+
+  PowerSensor ~ StreamProcessor until synchronized
+
+  stream PowerSensor rate 1 {
+    if reading > 1200 {
+      => when sync_level > 0.4 depth partial {
+        value <- reading
+        alert_level <- "warning"
+        anomaly <- "power consumption elevated"
+      }
+    }
+
+    * from apply {
+      stage: "power_reading"
+    }
+  }
+}
+
+-- CPU monitoring
+link CpuSensor <-> StreamProcessor priority normal continuous {
+  >> { quality: attending, priority: 0.5, confidence: 0.9, half_life: 60 }
+     "CPU utilization monitoring"
+
+  connect depth partial {
+    signal attending 0.5 between data "cpu stream"
+  }
+
+  CpuSensor ~ StreamProcessor until synchronized
+
+  stream CpuSensor rate 2 {
+    if reading > 80 {
+      => when sync_level > 0.4 depth deep {
+        value <- reading
+        alert_level <- "warning"
+        anomaly <- "CPU saturation"
+        host <- "gpu-node-01"
+      }
+    }
+
+    if reading > 95 {
+      => when sync_level > 0.4 depth deep {
+        value <- reading
+        alert_level <- "critical"
+        anomaly <- "CPU critical — possible OOM"
+      }
+    }
+  }
+}
+
+-- Alert aggregation
+link StreamProcessor <-> AlertSystem priority high {
+  >> { quality: recognizing, priority: 0.9, confidence: 0.85, half_life: 200 }
+     "Aggregating alerts from all sensor streams"
+
+  connect depth deep {
+    signal recognizing 0.9  between data "alert aggregation"
+    signal attending   0.85 inward  data "deduplication and suppression"
+  }
+
+  StreamProcessor ~ AlertSystem until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    active_alerts <- 2
+    alert_1 <- "temperature warning: server_room_a 26.3C"
+    alert_2 <- "network spike: 7200 pps on eth0"
+    suppressed <- 3
+    suppression_reason <- "duplicate within 60s window"
+    budget_utilization <- 0.78
+    signals_processed <- 450
+    signals_dropped <- 120
+    drop_rate <- 0.21
+  }
+
+  * from apply {
+    stage: "alert_summary"
+    active: 2
+    suppressed: 3
+  }
+}

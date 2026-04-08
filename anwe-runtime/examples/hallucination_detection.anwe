@@ -1,0 +1,210 @@
+-- HALLUCINATION DETECTION IN ANWE
+-- Cross-reference generation output against retrieved evidence.
+-- Flag claims that lack supporting evidence. Reject hallucinations.
+
+agent Query data {
+  text: "When was the Eiffel Tower built and who designed it?"
+}
+
+agent Retriever attention 0.8 external("callback", "retriever") data {
+  index: "knowledge_base"
+}
+
+agent Generator attention 0.7 external("callback", "generator") data {
+  model: "llama-70B"
+}
+
+agent FactChecker attention 0.9 data {
+  strategy: "claim_level_verification"
+}
+
+agent Output data {
+  status: "pending"
+}
+
+supervise one_for_one max_restarts 2 within 15000 {
+  permanent Retriever
+  permanent Generator
+}
+
+-- Retrieve evidence
+link Query <-> Retriever priority high {
+  >> { quality: attending, priority: 0.95, confidence: 0.85, half_life: 300 }
+     "Retrieving evidence documents"
+
+  connect depth deep {
+    signal attending   0.9  between data "searching knowledge base"
+    signal recognizing 0.85 inward  data "ranking documents"
+  }
+
+  Query ~ Retriever until resonating
+
+  => when sync_level > 0.7 depth deep {
+    evidence_1 <- "The Eiffel Tower was built from 1887 to 1889"
+    evidence_2 <- "Gustave Eiffel's company designed and built the tower"
+    evidence_3 <- "Built for the 1889 World's Fair in Paris"
+  }
+
+  * from apply {
+    stage: "retrieval"
+    documents: 3
+  }
+}
+
+-- Generate answer
+link Query <-> Generator priority high {
+  >> { quality: attending, priority: 0.9, confidence: 0.8, half_life: 200 }
+     "Generating answer"
+
+  connect depth deep {
+    signal attending   0.85 between data "model processing query"
+    signal recognizing 0.75 inward  data "generating response"
+  }
+
+  Query ~ Generator until resonating
+
+  => when sync_level > 0.7 depth deep {
+    claim_1 <- "The Eiffel Tower was built in 1889"
+    claim_2 <- "It was designed by Gustave Eiffel"
+    claim_3 <- "It is 324 meters tall"
+    claim_4 <- "It was originally painted red"
+  }
+
+  * from apply {
+    stage: "generation"
+    claims: 4
+  }
+}
+
+-- Check claim 1: "Built in 1889" — VERIFIED
+link Generator <-> FactChecker priority normal {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.9, half_life: 300 }
+     Generator.claim_1
+
+  connect depth deep {
+    signal recognizing 0.9  between data "checking: built in 1889"
+    signal attending   0.85 between data Retriever.evidence_1
+  }
+
+  Generator ~ FactChecker until resonating
+
+  <= when confidence <= 0.3 data "HALLUCINATION: no evidence"
+
+  => when sync_level > 0.7 depth deep {
+    claim1_verdict <- "verified"
+    claim1_confidence <- "0.95"
+  }
+
+  * from apply {
+    stage: "fact_check"
+    claim: "1"
+    verdict: "verified"
+  }
+}
+
+-- Check claim 2: "Designed by Eiffel" — VERIFIED
+link Generator <-> FactChecker priority normal {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.9, half_life: 300 }
+     Generator.claim_2
+
+  connect depth deep {
+    signal recognizing 0.9  between data "checking: designed by Eiffel"
+    signal attending   0.85 between data Retriever.evidence_2
+  }
+
+  Generator ~ FactChecker until resonating
+
+  <= when confidence <= 0.3 data "HALLUCINATION: attribution unsupported"
+
+  => when sync_level > 0.7 depth deep {
+    claim2_verdict <- "verified"
+    claim2_confidence <- "0.93"
+  }
+
+  * from apply {
+    stage: "fact_check"
+    claim: "2"
+    verdict: "verified"
+  }
+}
+
+-- Check claim 3: "324 meters" — UNSUPPORTED (no evidence)
+link Generator <-> FactChecker priority normal {
+  >> { quality: recognizing, priority: 0.8, confidence: 0.6, half_life: 300 }
+     Generator.claim_3
+
+  connect depth deep {
+    signal recognizing 0.7  between data "checking: 324 meters tall"
+    signal questioning 0.8  inward  data "no evidence mentions height"
+  }
+
+  Generator ~ FactChecker until resonating
+
+  <= when confidence <= 0.3 data "HALLUCINATION: height unsupported"
+
+  => when sync_level > 0.7 depth deep {
+    claim3_verdict <- "unsupported"
+    claim3_confidence <- "0.4"
+  }
+
+  * from apply {
+    stage: "fact_check"
+    claim: "3"
+    verdict: "unsupported"
+  }
+}
+
+-- Check claim 4: "Originally painted red" — HALLUCINATED
+link Generator <-> FactChecker priority normal {
+  >> { quality: recognizing, priority: 0.75, confidence: 0.5, half_life: 300 }
+     Generator.claim_4
+
+  connect depth deep {
+    signal recognizing 0.6  between data "checking: painted red"
+    signal disturbed   0.7  inward  data "likely hallucination"
+  }
+
+  Generator ~ FactChecker until resonating
+
+  <= when confidence <= 0.3 data "HALLUCINATION: paint color is misleading"
+
+  => when sync_level > 0.7 depth deep {
+    claim4_verdict <- "hallucinated"
+    claim4_confidence <- "0.2"
+  }
+
+  * from apply {
+    stage: "fact_check"
+    claim: "4"
+    verdict: "hallucinated"
+  }
+}
+
+-- Assemble verified output
+link FactChecker <-> Output priority background {
+  >> { quality: recognizing, priority: 0.5, confidence: 0.7, half_life: 100 }
+     "Assembling verified response"
+
+  connect depth full {
+    signal recognizing 0.6 between data "collecting verdicts"
+  }
+
+  FactChecker ~ Output until synchronized
+
+  => when sync_level > 0.5 depth deep {
+    verified_response <- "The Eiffel Tower was built in 1889, designed by Gustave Eiffel."
+    claims_verified <- "2"
+    claims_unsupported <- "1"
+    claims_hallucinated <- "1"
+    v1 <- FactChecker.claim1_verdict
+    v2 <- FactChecker.claim2_verdict
+    v3 <- FactChecker.claim3_verdict
+    v4 <- FactChecker.claim4_verdict
+  }
+
+  * from apply {
+    stage: "assembly"
+    verified: 2
+    stripped: 2
+  }
+}

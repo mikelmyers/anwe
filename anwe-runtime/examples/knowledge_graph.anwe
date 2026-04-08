@@ -1,0 +1,288 @@
+-- ─────────────────────────────────────────────────────────
+-- KNOWLEDGE GRAPH TRAVERSAL IN ANWE
+--
+-- Follow edges in a knowledge graph.
+-- Accumulate evidence with confidence at each hop.
+-- Confidence decays with distance (half_life on signals).
+--
+-- Fixed 3-hop traversal (can't iterate dynamically yet).
+-- Each hop reads from the previous via FieldAccess.
+-- Confidence decays naturally through half_life.
+--
+-- What this proves about ANWE:
+--   - Signal half_life as distance decay (not ad-hoc)
+--   - FieldAccess chains as graph edges
+--   - Confidence accumulates across hops
+--   - Converge synthesizes evidence from multiple paths
+--
+-- BUILDSHEET items covered:
+--   [x] Knowledge graph traversal (Memory & Knowledge)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- GRAPH NODES (modeled as agents)
+-- ═══════════════════════════════════════════════════════════
+
+-- Starting query node
+agent QueryNode data {
+  entity: "Albert Einstein"
+  question: "What institutions were connected to Einstein's work on relativity?"
+}
+
+-- Hop 1 nodes: direct connections to Einstein
+agent Node_Einstein attention 0.8 external("callback", "graph") data {
+  entity: "Albert_Einstein"
+  type: "Person"
+  edges: "born_in, worked_at, published, influenced"
+}
+
+-- Hop 2 nodes: institutions Einstein worked at
+agent Node_ETH data {
+  entity: "ETH_Zurich"
+  type: "Institution"
+  relation_to_einstein: "professor_1912_1914"
+}
+
+agent Node_PatentOffice data {
+  entity: "Swiss_Patent_Office"
+  type: "Institution"
+  relation_to_einstein: "clerk_1902_1909"
+}
+
+agent Node_Princeton data {
+  entity: "Princeton_IAS"
+  type: "Institution"
+  relation_to_einstein: "professor_1933_1955"
+}
+
+-- Hop 3 node: connected through institution
+agent Node_Relativity data {
+  entity: "General_Relativity"
+  type: "Theory"
+  published_year: "1915"
+}
+
+-- Evidence collector
+agent Evidence attention 0.5 data {
+  method: "multi_hop_traversal"
+  max_hops: 3
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 2 within 15000 {
+  permanent Node_Einstein
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- HOP 1: Query → Einstein node
+-- High confidence (direct lookup). High half_life (recent info).
+-- ═══════════════════════════════════════════════════════════
+
+link QueryNode <-> Node_Einstein priority high {
+  >> { quality: attending, priority: 0.95, confidence: 0.95, half_life: 1000 }
+     "Hop 1: Looking up Albert Einstein in knowledge graph"
+
+  connect depth deep {
+    signal attending   0.95 between data "querying entity: Albert Einstein"
+    signal recognizing 0.9  inward  data "found: Person node with 4 edges"
+  }
+
+  QueryNode ~ Node_Einstein until resonating
+
+  => when sync_level > 0.7 depth deep {
+    hop1_entity <- "Albert_Einstein"
+    hop1_type <- "Person"
+    hop1_edges_found <- "4"
+    hop1_confidence <- "0.95"
+    hop1_relation <- "direct_match"
+  }
+
+  * from apply {
+    stage: "traversal"
+    hop: "1"
+    entity: "Albert_Einstein"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- HOP 2a: Einstein → ETH Zurich (worked_at edge)
+-- Confidence slightly lower (one hop away). Half_life shorter.
+-- ═══════════════════════════════════════════════════════════
+
+link Node_Einstein <-> Node_ETH priority normal {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.88, half_life: 500 }
+     "Hop 2a: Following 'worked_at' edge → ETH Zurich"
+
+  connect depth deep {
+    signal recognizing 0.88 between data "Einstein was professor at ETH 1912-1914"
+    signal attending   0.8  between data Node_Einstein.hop1_entity
+  }
+
+  Node_Einstein ~ Node_ETH until resonating
+
+  => when sync_level > 0.7 depth deep {
+    hop2a_entity <- "ETH_Zurich"
+    hop2a_relation <- "worked_at"
+    hop2a_years <- "1912-1914"
+    hop2a_confidence <- "0.88"
+    hop2a_evidence <- "Einstein taught theoretical physics at ETH before publishing general relativity"
+  }
+
+  * from apply {
+    stage: "traversal"
+    hop: "2a"
+    entity: "ETH_Zurich"
+    edge: "worked_at"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- HOP 2b: Einstein → Patent Office (worked_at edge)
+-- ═══════════════════════════════════════════════════════════
+
+link Node_Einstein <-> Node_PatentOffice priority normal {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.9, half_life: 500 }
+     "Hop 2b: Following 'worked_at' edge → Swiss Patent Office"
+
+  connect depth deep {
+    signal recognizing 0.9  between data "Einstein was clerk at Swiss Patent Office 1902-1909"
+    signal attending   0.85 between data "where special relativity was conceived"
+  }
+
+  Node_Einstein ~ Node_PatentOffice until resonating
+
+  => when sync_level > 0.7 depth deep {
+    hop2b_entity <- "Swiss_Patent_Office"
+    hop2b_relation <- "worked_at"
+    hop2b_years <- "1902-1909"
+    hop2b_confidence <- "0.90"
+    hop2b_evidence <- "Einstein developed special relativity (1905) while working at the patent office"
+  }
+
+  * from apply {
+    stage: "traversal"
+    hop: "2b"
+    entity: "Swiss_Patent_Office"
+    edge: "worked_at"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- HOP 2c: Einstein → Princeton IAS (worked_at edge)
+-- ═══════════════════════════════════════════════════════════
+
+link Node_Einstein <-> Node_Princeton priority normal {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.92, half_life: 500 }
+     "Hop 2c: Following 'worked_at' edge → Princeton IAS"
+
+  connect depth deep {
+    signal recognizing 0.92 between data "Einstein was professor at IAS 1933-1955"
+    signal attending   0.85 between data "where Einstein spent final decades"
+  }
+
+  Node_Einstein ~ Node_Princeton until resonating
+
+  => when sync_level > 0.7 depth deep {
+    hop2c_entity <- "Princeton_IAS"
+    hop2c_relation <- "worked_at"
+    hop2c_years <- "1933-1955"
+    hop2c_confidence <- "0.92"
+    hop2c_evidence <- "Einstein continued relativity work at Princeton until 1955"
+  }
+
+  * from apply {
+    stage: "traversal"
+    hop: "2c"
+    entity: "Princeton_IAS"
+    edge: "worked_at"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- HOP 3: ETH → General Relativity (connected_to edge)
+-- Lowest confidence (3 hops away). Shortest half_life.
+-- ═══════════════════════════════════════════════════════════
+
+link Node_ETH <-> Node_Relativity priority low {
+  >> { quality: recognizing, priority: 0.75, confidence: 0.78, half_life: 200 }
+     "Hop 3: Following 'connected_to' edge → General Relativity"
+
+  connect depth deep {
+    signal recognizing 0.78 between data "ETH connected to general relativity through Einstein's work"
+    signal questioning 0.6  inward  data "confidence decays with hop distance"
+  }
+
+  Node_ETH ~ Node_Relativity until resonating
+
+  -- Reject: too many hops, confidence too low
+  <= when confidence <= 0.3 data "traversal confidence too low — stopping"
+
+  => when sync_level > 0.7 depth deep {
+    hop3_entity <- "General_Relativity"
+    hop3_relation <- "connected_to"
+    hop3_year <- "1915"
+    hop3_confidence <- "0.78"
+    hop3_path <- "Einstein → ETH_Zurich → General_Relativity"
+    hop3_evidence <- "Einstein developed mathematical framework for GR partly while at ETH and completed it in 1915"
+  }
+
+  * from apply {
+    stage: "traversal"
+    hop: "3"
+    entity: "General_Relativity"
+    edge: "connected_to"
+    hops_from_query: 3
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SYNTHESIZE: Converge all evidence
+-- ═══════════════════════════════════════════════════════════
+
+link Node_Einstein <-> Evidence priority background {
+  >> { quality: recognizing, priority: 0.5, confidence: 0.7, half_life: 100 }
+     "Synthesizing evidence from all graph paths"
+
+  connect depth full {
+    signal recognizing 0.6 between data "collecting multi-hop evidence"
+  }
+
+  Node_Einstein ~ Evidence until synchronized
+
+  converge Node_Einstein <<>> Evidence {
+    >> { quality: recognizing, priority: 0.5 }
+       Node_ETH.hop2a_evidence
+    >> { quality: recognizing, priority: 0.5 }
+       Node_PatentOffice.hop2b_evidence
+  }
+
+  => when sync_level > 0.3 depth deep {
+    answer <- "Einstein's relativity work was connected to: Swiss Patent Office (special relativity, 1905), ETH Zurich (teaching 1912-1914), Princeton IAS (continued work 1933-1955). General relativity (1915) has connections through ETH."
+    institutions <- "Swiss Patent Office, ETH Zurich, Princeton IAS"
+    total_hops <- "3"
+    paths_explored <- "4"
+    eth_evidence <- Node_ETH.hop2a_evidence
+    patent_evidence <- Node_PatentOffice.hop2b_evidence
+    princeton_evidence <- Node_Princeton.hop2c_evidence
+    highest_confidence <- "0.92 (Princeton path)"
+    lowest_confidence <- "0.78 (3-hop ETH→Relativity path)"
+  }
+
+  * from apply {
+    stage: "synthesis"
+    answer_entities: 3
+    max_depth: 3
+    paths: 4
+  }
+}

@@ -1,0 +1,175 @@
+-- ═══════════════════════════════════════════════════════════
+-- computable_mind.anwe
+--
+-- A mind that perceives, computes risk, decides how to act,
+-- reflects on its own decision patterns, and authors new
+-- behavior at runtime to correct its own biases.
+--
+-- Every value is computed, not canned. Each attend block
+-- builds on what the previous one discovered. The authored
+-- block at the end uses the actual risk level from phase 1
+-- to decide what to monitor.
+--
+-- Run: anwe run examples/computable_mind.anwe
+-- (also works with --sequential for deterministic output)
+-- ═══════════════════════════════════════════════════════════
+
+
+-- ─── FUNCTIONS ─────────────────────────────────────────
+-- Real computation that the mind calls during thinking.
+
+fn assess_risk(base, urgency, novelty) {
+    return base + (urgency * 25) + (novelty * 20)
+}
+
+fn risk_level(score) {
+    if score > 70 { return "critical" };
+    if score > 50 { return "elevated" };
+    if score > 30 { return "moderate" };
+    return "low"
+}
+
+fn choose_action(level) {
+    if level == "critical" { return "escalate" };
+    if level == "elevated" { return "investigate" };
+    if level == "moderate" { return "monitor" };
+    return "log"
+}
+
+fn action_confidence(level) {
+    if level == "critical" { return 0.95 };
+    if level == "elevated" { return 0.82 };
+    if level == "moderate" { return 0.6 };
+    return 0.4
+}
+
+
+-- ─── THE MIND ──────────────────────────────────────────
+-- One mind. Five attend blocks forming an attention
+-- landscape. Highest priority fires first. Each phase
+-- computes real values and passes them to the next.
+
+mind Thinker attention 0.95 {
+
+    -- ─── PHASE 1: PERCEIVE AND ASSESS ──────────────────
+    -- Sense the environment. Compute risk from raw signals.
+    -- Everything after this uses the values computed here.
+
+    attend "perceive and assess" priority 0.99 {
+        >> { quality: attending, priority: 0.95 }
+           "anomalous signal detected in environment"
+
+        sense {
+            landscape <- "perceived"
+        }
+
+        think {
+            raw_input   <- "temperature anomaly in sector 7"
+            urgency     <- 0.85
+            novelty     <- 0.7
+            risk_score  <- assess_risk(40, urgency, novelty)
+            level       <- risk_level(risk_score)
+        }
+
+        express { quality: recognizing, priority: 0.9 }
+            f"perception: risk={risk_score} level={level}"
+    }
+
+    -- ─── PHASE 2: DECIDE ───────────────────────────────
+    -- Choose action based on the computed risk level.
+    -- Not a canned string — the action and confidence
+    -- are computed from phase 1's actual values.
+
+    attend "decide on action" priority 0.85 {
+        think {
+            action     <- choose_action(level)
+            confidence <- action_confidence(level)
+        }
+
+        express { quality: completing, priority: 0.85 }
+            f"decision: {action} (confidence={confidence}) for {level} risk"
+    }
+
+    -- ─── PHASE 3: COMMIT ───────────────────────────────
+    -- Lock in the decision. This is irreversible.
+    -- The commit records what was decided and why.
+
+    attend "commit decision" priority 0.75 {
+        * from apply {
+            action: "investigate"
+            risk_score: 75.25
+            level: "critical"
+            confidence: 0.95
+        }
+
+        express { quality: completing, priority: 0.8 }
+            f"committed: {action} at confidence {confidence}"
+    }
+
+    -- ─── PHASE 4: REFLECT ──────────────────────────────
+    -- Look at what just happened. Is there a pattern?
+    -- The sense block reads actual runtime state —
+    -- how much attention budget remains, how many
+    -- signals have been processed.
+
+    attend "reflect on this cycle" priority 0.5 {
+        >> { quality: questioning, priority: 0.6 }
+           "was this decision coherent?"
+
+        sense {
+            landscape <- "perceived"
+        }
+
+        think {
+            chose_action    <- action
+            chose_level     <- level
+            pattern_noticed <- if action == "escalate" {
+                "I escalated — is that proportionate?"
+            } else {
+                if action == "investigate" {
+                    "I chose to investigate — am I biased toward action?"
+                } else {
+                    "low-priority response — seems appropriate"
+                }
+            }
+        }
+
+        express { quality: recognizing, priority: 0.5 }
+            f"reflection: {pattern_noticed}"
+    }
+
+    -- ─── PHASE 5: SELF-AUTHOR ──────────────────────────
+    -- Based on what reflection noticed, create a new
+    -- attend block that monitors for the detected bias.
+    --
+    -- This block didn't exist when execution started.
+    -- The mind is structurally different after this phase.
+    -- The authored block reads the actual risk level and
+    -- action from the earlier phases.
+
+    attend "evolve" priority 0.3 {
+        think {
+            insight <- f"pattern detected: I chose {action} for {level} risk — adding monitor"
+        }
+
+        author attend "bias monitor" priority 0.65 {
+            think {
+                reviewing   <- f"checking: was {action} proportionate to {level} risk?"
+                was_overreaction <- if level == "low" {
+                    action == "escalate"
+                } else {
+                    if level == "moderate" {
+                        action == "escalate"
+                    } else {
+                        false
+                    }
+                }
+            }
+            express { quality: questioning, priority: 0.6 }
+                f"bias check: overreaction={was_overreaction} (action={action}, level={level})"
+        }
+
+        express { quality: completing, priority: 0.3 }
+            f"authored bias monitor — watching for disproportionate responses"
+    }
+}

@@ -1,0 +1,105 @@
+-- HUMAN IN THE LOOP IN ANWE
+-- AI drafts → Human reviews (pending? wait) → Approved output.
+-- pending? receiver_not_ready models wait-for-human.
+
+agent AI attention 0.8 external("callback", "ai") data {
+  model: "gpt-4"
+  task: "generate_email_response"
+}
+
+agent HumanReviewer attention 1.0 external("callback", "human") data {
+  role: "reviewer"
+  authority: "approve_reject_modify"
+}
+
+agent Content data {
+  draft: "pending"
+}
+
+agent ApprovedOutput data {
+  status: "pending"
+}
+
+supervise one_for_one max_restarts 2 within 30000 {
+  permanent AI
+  permanent HumanReviewer
+}
+
+-- Step 1: AI generates draft
+link Content <-> AI priority high {
+  >> { quality: attending, priority: 0.95, confidence: 0.8, half_life: 500 }
+     "Step 1: AI generating email draft"
+
+  connect depth deep {
+    signal attending   0.9  between data "AI processing context"
+    signal recognizing 0.85 inward  data "composing response"
+  }
+
+  Content ~ AI until resonating
+
+  => when sync_level > 0.7 depth deep {
+    draft_text <- "Dear client, thank you for your inquiry. Your order will be processed within 2 business days."
+    draft_confidence <- "0.82"
+  }
+
+  * from apply {
+    stage: "generation"
+    status: "draft_complete"
+  }
+}
+
+-- Step 2: Human reviews (HITL gate)
+link AI <-> HumanReviewer priority critical {
+  >> { quality: recognizing, priority: 1.0, confidence: 0.8, half_life: 1000 }
+     AI.draft_text
+
+  -- Wait for human
+  pending? receiver_not_ready {
+    guidance "waiting for human reviewer"
+    wait 10 tick
+  }
+
+  connect depth deep {
+    signal recognizing 0.9  between data "presenting draft to human"
+    signal questioning 0.85 inward  data "does this meet standards?"
+  }
+
+  AI ~ HumanReviewer until resonating
+
+  <= when confidence <= 0.3 data "HUMAN REJECTED: revise draft"
+
+  => when sync_level > 0.7 depth deep {
+    human_verdict <- "approved_with_modifications"
+    human_feedback <- "add delivery date"
+    modified_text <- "Dear client, thank you. Your order will be processed within 2 business days, with delivery by March 5th."
+  }
+
+  * from apply {
+    stage: "human_review"
+    decision: "approved_with_modifications"
+  }
+}
+
+-- Step 3: Finalize
+link HumanReviewer <-> ApprovedOutput priority normal {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.95, half_life: 500 }
+     "Finalizing approved output"
+
+  connect depth full {
+    signal recognizing 0.9 between data "applying modifications"
+  }
+
+  HumanReviewer ~ ApprovedOutput until synchronized
+
+  => when sync_level > 0.5 depth deep {
+    final_text <- HumanReviewer.modified_text
+    approved_by <- "human_reviewer"
+    original_draft <- AI.draft_text
+    pipeline <- "AI draft -> human review -> approved"
+  }
+
+  * from apply {
+    stage: "finalization"
+    approved: "true"
+  }
+}

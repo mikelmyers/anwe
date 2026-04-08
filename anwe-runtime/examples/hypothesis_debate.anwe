@@ -1,0 +1,150 @@
+-- HYPOTHESIS DEBATE IN ANWE
+-- Proponent vs Opponent. Judge evaluates via converge.
+
+agent Question data {
+  hypothesis: "AI systems should explain their decisions"
+}
+
+agent Proponent attention 0.8 external("callback", "proponent") data {
+  position: "for"
+}
+
+agent Opponent attention 0.8 external("callback", "opponent") data {
+  position: "against"
+}
+
+agent Judge attention 1.0 data {
+  method: "structured_evaluation"
+}
+
+supervise one_for_one max_restarts 2 within 15000 {
+  permanent Proponent
+  permanent Opponent
+}
+
+-- Proponent opening
+link Question <-> Proponent priority high {
+  >> { quality: recognizing, priority: 0.9, confidence: 0.85, half_life: 400 }
+     "Opening argument FOR explainability"
+
+  connect depth deep {
+    signal recognizing 0.9  between data "constructing pro argument"
+    signal attending   0.85 between data "citing accountability"
+  }
+
+  Question ~ Proponent until resonating
+
+  => when sync_level > 0.7 depth deep {
+    pro_arg_1 <- "Explainability is essential for accountability in consequential decisions"
+    pro_confidence_1 <- "0.88"
+  }
+
+  * from apply {
+    stage: "opening"
+    side: "proponent"
+  }
+}
+
+-- Opponent opening
+link Question <-> Opponent priority high {
+  >> { quality: recognizing, priority: 0.9, confidence: 0.8, half_life: 400 }
+     "Opening argument AGAINST mandatory explainability"
+
+  connect depth deep {
+    signal recognizing 0.85 between data "constructing con argument"
+    signal attending   0.8  between data "citing feasibility concerns"
+  }
+
+  Question ~ Opponent until resonating
+
+  => when sync_level > 0.7 depth deep {
+    con_arg_1 <- "Mandatory explainability is infeasible and freezes development"
+    con_confidence_1 <- "0.82"
+  }
+
+  * from apply {
+    stage: "opening"
+    side: "opponent"
+  }
+}
+
+-- Proponent rebuttal
+link Opponent <-> Proponent priority normal {
+  >> { quality: questioning, priority: 0.85, confidence: 0.8, half_life: 300 }
+     Opponent.con_arg_1
+
+  connect depth deep {
+    signal questioning 0.85 inward  data "rebutting feasibility claim"
+    signal recognizing 0.8  between data "post-hoc methods exist"
+  }
+
+  Opponent ~ Proponent until resonating
+
+  => when sync_level > 0.7 depth deep {
+    pro_rebuttal <- "Post-hoc methods (SHAP, LIME) work without sacrificing accuracy"
+    pro_rebuttal_confidence <- "0.85"
+  }
+
+  * from apply {
+    stage: "rebuttal"
+    side: "proponent"
+  }
+}
+
+-- Opponent rebuttal
+link Proponent <-> Opponent priority normal {
+  >> { quality: questioning, priority: 0.85, confidence: 0.8, half_life: 300 }
+     Proponent.pro_arg_1
+
+  connect depth deep {
+    signal questioning 0.85 inward  data "rebutting rights argument"
+    signal recognizing 0.75 between data "false explanations are worse"
+  }
+
+  Proponent ~ Opponent until resonating
+
+  => when sync_level > 0.7 depth deep {
+    con_rebuttal <- "Post-hoc explanations are often unfaithful to actual model reasoning"
+    con_rebuttal_confidence <- "0.79"
+  }
+
+  * from apply {
+    stage: "rebuttal"
+    side: "opponent"
+  }
+}
+
+-- Judging via converge
+link Proponent <-> Judge priority low {
+  >> { quality: recognizing, priority: 0.8, confidence: 0.85, half_life: 500 }
+     "Judge evaluating debate"
+
+  connect depth full {
+    signal recognizing 0.85 between data "weighing arguments"
+  }
+
+  Proponent ~ Judge until synchronized
+
+  converge Proponent <<>> Judge {
+    >> { quality: recognizing, priority: 0.8 }
+       Opponent.con_arg_1
+    >> { quality: recognizing, priority: 0.8 }
+       Opponent.con_rebuttal
+  }
+
+  <= when confidence <= 0.3 data "debate inconclusive"
+
+  => when sync_level > 0.5 depth deep {
+    pro_opening <- Proponent.pro_arg_1
+    con_opening <- Opponent.con_arg_1
+    verdict <- "proponent wins"
+    reasoning <- "Rights-based argument stronger; legal precedent (GDPR) supports it"
+    margin <- "narrow"
+  }
+
+  * from apply {
+    stage: "verdict"
+    winner: "proponent"
+    confidence: "0.86"
+  }
+}

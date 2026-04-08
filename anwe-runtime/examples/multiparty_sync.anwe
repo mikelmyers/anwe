@@ -1,0 +1,230 @@
+-- ─────────────────────────────────────────────────────────
+-- MULTI-PARTY SYNC IN ANWE
+--
+-- Synchronize across 3+ agents simultaneously.
+-- Current sync is pairwise (A ~ B). Multi-party extends
+-- this to N-way synchronization with quorum semantics.
+--
+-- Used for: distributed gradient sync, consensus protocols,
+-- ensemble agreement, federated learning rounds.
+--
+-- What this proves about ANWE:
+--   - sync_all — N agents synchronize together
+--   - quorum — proceed when K of N are synced
+--   - Barrier semantics — all must reach sync point
+--   - Natural extension of pairwise sync primitive
+--
+-- BUILDSHEET items covered:
+--   [x] Multi-party sync (Language Features)
+--   [x] Distributed gradient sync (Training & Learning)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS — 4 training workers + 1 parameter server
+-- ═══════════════════════════════════════════════════════════
+
+agent ParameterServer attention 0.95 data {
+  global_weights: "v0"
+  sync_round: 0
+  workers_synced: 0
+  total_workers: 4
+}
+
+agent Worker_A attention 0.8 external("callback", "trainer_a") data {
+  local_gradients: "grad_a_r0"
+  batch_loss: 2.34
+  learning_rate: 0.001
+  samples_processed: 256
+}
+
+agent Worker_B attention 0.8 external("callback", "trainer_b") data {
+  local_gradients: "grad_b_r0"
+  batch_loss: 2.41
+  learning_rate: 0.001
+  samples_processed: 256
+}
+
+agent Worker_C attention 0.8 external("callback", "trainer_c") data {
+  local_gradients: "grad_c_r0"
+  batch_loss: 2.28
+  learning_rate: 0.001
+  samples_processed: 256
+}
+
+agent Worker_D attention 0.8 external("callback", "trainer_d") data {
+  local_gradients: "grad_d_r0"
+  batch_loss: 2.39
+  learning_rate: 0.001
+  samples_processed: 256
+}
+
+agent SyncBarrier data {
+  arrived: []
+  required: 4
+  round: 0
+  status: "waiting"
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise rest_for_one max_restarts 5 within 60000 {
+  ParameterServer
+  Worker_A
+  Worker_B
+  Worker_C
+  Worker_D
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LINKS
+-- ═══════════════════════════════════════════════════════════
+
+-- Each worker computes local gradients independently
+link Worker_A <-> Worker_A priority high {
+  >> { quality: applying, priority: 0.9, confidence: 0.85, half_life: 200 }
+     "Worker A computing local gradients"
+
+  connect depth deep {
+    signal applying 0.9 inward data "forward pass + backward pass"
+  }
+
+  => when sync_level > 0.5 depth deep {
+    local_gradients <- "grad_a_r1"
+    batch_loss <- 1.87
+    samples_processed <- 512
+  }
+
+  * from apply {
+    stage: "local_training"
+    worker: "A"
+  }
+}
+
+link Worker_B <-> Worker_B priority high {
+  >> { quality: applying, priority: 0.9, confidence: 0.85, half_life: 200 }
+     "Worker B computing local gradients"
+
+  connect depth deep {
+    signal applying 0.9 inward data "forward pass + backward pass"
+  }
+
+  => when sync_level > 0.5 depth deep {
+    local_gradients <- "grad_b_r1"
+    batch_loss <- 1.92
+    samples_processed <- 512
+  }
+
+  * from apply {
+    stage: "local_training"
+    worker: "B"
+  }
+}
+
+link Worker_C <-> Worker_C priority high {
+  >> { quality: applying, priority: 0.9, confidence: 0.85, half_life: 200 }
+     "Worker C computing local gradients"
+
+  connect depth deep {
+    signal applying 0.9 inward data "forward pass + backward pass"
+  }
+
+  => when sync_level > 0.5 depth deep {
+    local_gradients <- "grad_c_r1"
+    batch_loss <- 1.79
+    samples_processed <- 512
+  }
+
+  * from apply {
+    stage: "local_training"
+    worker: "C"
+  }
+}
+
+link Worker_D <-> Worker_D priority high {
+  >> { quality: applying, priority: 0.9, confidence: 0.85, half_life: 200 }
+     "Worker D computing local gradients"
+
+  connect depth deep {
+    signal applying 0.9 inward data "forward pass + backward pass"
+  }
+
+  => when sync_level > 0.5 depth deep {
+    local_gradients <- "grad_d_r1"
+    batch_loss <- 1.85
+    samples_processed <- 512
+  }
+
+  * from apply {
+    stage: "local_training"
+    worker: "D"
+  }
+}
+
+-- Multi-party sync: all 4 workers synchronize with parameter server
+link SyncBarrier <-> ParameterServer priority critical {
+  >> { quality: applying, priority: 0.98, confidence: 0.9, half_life: 100 }
+     "All-reduce gradient synchronization across 4 workers"
+
+  connect depth deep {
+    signal applying    0.95 between data "gradient barrier"
+    signal recognizing 0.9  inward  data "collecting all gradients"
+  }
+
+  -- Multi-party sync: all workers must reach this point
+  sync_all [Worker_A, Worker_B, Worker_C, Worker_D] until synchronized {
+    quorum: 4
+    timeout_ticks: 1000
+    strategy: "all_reduce"
+  }
+
+  -- Once all synchronized, aggregate gradients
+  => when sync_level > 0.8 depth deep {
+    gradients_collected <- 4
+    avg_loss <- 1.8575
+    aggregation_method <- "mean"
+    global_weights <- "v1"
+    sync_round <- 1
+  }
+
+  -- Broadcast updated weights back to all workers
+  broadcast [Worker_A, Worker_B, Worker_C, Worker_D] {
+    signal applying 0.9 between data "updated global weights v1"
+  }
+
+  * from apply {
+    stage: "gradient_sync"
+    round: 1
+    workers_synced: 4
+    avg_loss: 1.8575
+  }
+}
+
+-- Second training round after sync
+link ParameterServer <-> SyncBarrier priority high {
+  >> { quality: recognizing, priority: 0.9, confidence: 0.85, half_life: 200 }
+     "Starting round 2 with updated weights"
+
+  connect depth full {
+    signal recognizing 0.85 between data "round 2 preparation"
+    signal attending   0.8  inward  data "weight distribution confirmed"
+  }
+
+  ParameterServer ~ SyncBarrier until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    round <- 2
+    global_weights <- "v1"
+    expected_improvement <- "15-20% loss reduction"
+    convergence_estimate <- "round 5-7"
+  }
+
+  * from apply {
+    stage: "round_start"
+    round: 2
+  }
+}

@@ -1,0 +1,13 @@
+[package]
+name = "anwe-runtime"
+version.workspace = true
+edition.workspace = true
+description = "ANWE runtime — lock-free pulse channels, fiber scheduler, primitive executors"
+
+[dependencies]
+anwe-core = { workspace = true }
+anwe-parser = { workspace = true }
+anwe-bridge = { workspace = true }
+crossbeam-utils = { workspace = true }
+reqwest = { workspace = true }
+serde_json = { workspace = true }

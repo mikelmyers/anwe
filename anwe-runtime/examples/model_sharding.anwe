@@ -1,0 +1,233 @@
+-- ─────────────────────────────────────────────────────────
+-- MODEL SHARDING IN ANWE
+--
+-- Split a large model across multiple nodes.
+-- Each node holds a partition (shard) of the model.
+-- Inference requires coordinated execution across all shards.
+--
+-- ANWE's signal routing and sync handle inter-shard
+-- communication natively — no custom RPC needed.
+--
+-- BUILDSHEET items covered:
+--   [x] Model sharding (Distributed AI)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS — 4 GPUs, each holding model layers
+-- ═══════════════════════════════════════════════════════════
+
+-- Pipeline parallelism: model split across 4 stages
+agent Shard_0 attention 0.9 bridge("grpc", "gpu-0.internal:9090") data {
+  gpu: "A100-0"
+  layers: "0-15"
+  parameters: "17.5B"
+  vram_used_gb: 35
+  status: "ready"
+}
+
+agent Shard_1 attention 0.9 bridge("grpc", "gpu-1.internal:9090") data {
+  gpu: "A100-1"
+  layers: "16-31"
+  parameters: "17.5B"
+  vram_used_gb: 35
+  status: "ready"
+}
+
+agent Shard_2 attention 0.9 bridge("grpc", "gpu-2.internal:9090") data {
+  gpu: "A100-2"
+  layers: "32-47"
+  parameters: "17.5B"
+  vram_used_gb: 35
+  status: "ready"
+}
+
+agent Shard_3 attention 0.9 bridge("grpc", "gpu-3.internal:9090") data {
+  gpu: "A100-3"
+  layers: "48-63"
+  parameters: "17.5B"
+  vram_used_gb: 35
+  status: "ready"
+}
+
+-- Coordinator that manages the pipeline
+agent ShardCoordinator attention 0.95 data {
+  total_shards: 4
+  total_parameters: "70B"
+  pipeline_stages: 4
+  microbatch_size: 4
+  status: "idle"
+}
+
+-- Input/output buffers
+agent InputBuffer data {
+  request: "Explain the philosophical implications of quantum computing"
+  tokens: 9
+  batch_id: "batch_001"
+}
+
+agent OutputBuffer data {
+  response: ""
+  tokens_generated: 0
+  total_latency_ms: 0
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise rest_for_one max_restarts 3 within 30000 {
+  ShardCoordinator
+  Shard_0
+  Shard_1
+  Shard_2
+  Shard_3
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LINKS — pipeline parallel inference
+-- ═══════════════════════════════════════════════════════════
+
+-- Stage 0: Embedding + Layers 0-15
+link InputBuffer <-> Shard_0 priority critical {
+  >> { quality: applying, priority: 0.95, confidence: 0.9, half_life: 100 }
+     "Shard 0: embedding + layers 0-15"
+
+  connect depth deep {
+    signal applying    0.95 between data "pipeline stage 0"
+    signal recognizing 0.9  inward  data "forward pass layers 0-15"
+  }
+
+  InputBuffer ~ Shard_0 until synchronized timeout 5000 {
+    on_timeout: pending
+  }
+
+  => when sync_level > 0.8 depth deep {
+    activations <- "act_layer_15"
+    shape <- "[1, 9, 8192]"
+    compute_ms <- 12
+    memory_peak_gb <- 38
+    stage <- 0
+  }
+
+  * from apply {
+    stage: "shard_0"
+    layers: "0-15"
+    compute_ms: 12
+  }
+}
+
+-- Stage 1: Layers 16-31 (receives activations from Shard_0)
+link Shard_0 <-> Shard_1 priority critical {
+  >> { quality: applying, priority: 0.95, confidence: 0.9, half_life: 100 }
+     "Shard 0 → Shard 1: passing activations across GPU boundary"
+
+  connect depth deep {
+    signal applying 0.95 between data "inter-shard activation transfer"
+  }
+
+  Shard_0 ~ Shard_1 until synchronized timeout 5000 {
+    on_timeout: pending
+  }
+
+  => when sync_level > 0.8 depth deep {
+    activations <- "act_layer_31"
+    shape <- "[1, 9, 8192]"
+    compute_ms <- 11
+    transfer_ms <- 2
+    stage <- 1
+  }
+
+  * from apply {
+    stage: "shard_1"
+    layers: "16-31"
+    compute_ms: 11
+  }
+}
+
+-- Stage 2: Layers 32-47
+link Shard_1 <-> Shard_2 priority critical {
+  >> { quality: applying, priority: 0.95, confidence: 0.9, half_life: 100 }
+     "Shard 1 → Shard 2: pipeline stage 2"
+
+  connect depth deep {
+    signal applying 0.95 between data "inter-shard activation transfer"
+  }
+
+  Shard_1 ~ Shard_2 until synchronized timeout 5000 {
+    on_timeout: pending
+  }
+
+  => when sync_level > 0.8 depth deep {
+    activations <- "act_layer_47"
+    shape <- "[1, 9, 8192]"
+    compute_ms <- 12
+    transfer_ms <- 2
+    stage <- 2
+  }
+
+  * from apply {
+    stage: "shard_2"
+    layers: "32-47"
+    compute_ms: 12
+  }
+}
+
+-- Stage 3: Layers 48-63 + LM Head
+link Shard_2 <-> Shard_3 priority critical {
+  >> { quality: applying, priority: 0.95, confidence: 0.9, half_life: 100 }
+     "Shard 2 → Shard 3: pipeline stage 3 + output head"
+
+  connect depth deep {
+    signal applying 0.95 between data "final stage + LM head"
+  }
+
+  Shard_2 ~ Shard_3 until synchronized timeout 5000 {
+    on_timeout: pending
+  }
+
+  => when sync_level > 0.8 depth deep {
+    logits <- "logits_vocab_128k"
+    next_token <- "Quantum"
+    compute_ms <- 13
+    transfer_ms <- 2
+    stage <- 3
+  }
+
+  * from apply {
+    stage: "shard_3"
+    layers: "48-63 + head"
+    compute_ms: 13
+  }
+}
+
+-- Collect output
+link Shard_3 <-> OutputBuffer priority high {
+  >> { quality: completing, priority: 0.9, confidence: 0.95, half_life: 200 }
+     "Collecting generated token from pipeline"
+
+  connect depth full {
+    signal completing  0.9 between data "token generation complete"
+    signal recognizing 0.8 inward  data "appending to output"
+  }
+
+  Shard_3 ~ OutputBuffer until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    token <- "Quantum"
+    tokens_generated <- 1
+    pipeline_latency_ms <- 54
+    compute_total_ms <- 48
+    transfer_total_ms <- 6
+    pipeline_efficiency <- 0.89
+    throughput_tokens_per_sec <- 18.5
+  }
+
+  * from apply {
+    stage: "output"
+    token: "Quantum"
+    latency: 54
+  }
+}

@@ -1,0 +1,126 @@
+-- CONFIDENCE CALIBRATION IN ANWE
+-- Compare predicted confidence to actual accuracy across 3 bins.
+-- Compute Expected Calibration Error (ECE).
+
+agent Model attention 0.8 external("callback", "model") data {
+  name: "llama-70B"
+  calibration_status: "uncalibrated"
+}
+
+agent GroundTruth data {
+  dataset: "calibration_test_set"
+  samples: 100
+}
+
+agent Calibrator attention 0.5 data {
+  strategy: "temperature_scaling"
+  bins: 10
+}
+
+supervise one_for_one max_restarts 2 within 15000 {
+  permanent Model
+}
+
+-- Bin 1: High confidence (0.9-1.0) — overconfident
+link Model <-> GroundTruth priority high {
+  >> { quality: recognizing, priority: 0.9, confidence: 0.95, half_life: 500 }
+     "Bin 1: evaluating high-confidence predictions"
+
+  connect depth deep {
+    signal recognizing 0.9  between data "model predictions with confidence 0.95"
+    signal attending   0.85 between data "ground truth labels"
+  }
+
+  Model ~ GroundTruth until resonating
+
+  => when sync_level > 0.7 depth deep {
+    bin1_predicted_confidence <- "0.95"
+    bin1_actual_accuracy <- "0.82"
+    bin1_gap <- "0.13"
+    bin1_direction <- "overconfident"
+  }
+
+  * from apply {
+    stage: "calibration"
+    bin: "1"
+    finding: "overconfident"
+  }
+}
+
+-- Bin 2: Medium confidence (0.6-0.9)
+link Model <-> GroundTruth priority normal {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.75, half_life: 500 }
+     "Bin 2: evaluating medium-confidence predictions"
+
+  connect depth deep {
+    signal recognizing 0.85 between data "model predictions with confidence 0.75"
+    signal attending   0.8  between data "ground truth labels"
+  }
+
+  Model ~ GroundTruth until resonating
+
+  => when sync_level > 0.7 depth deep {
+    bin2_predicted_confidence <- "0.75"
+    bin2_actual_accuracy <- "0.71"
+    bin2_gap <- "0.04"
+    bin2_direction <- "slightly_overconfident"
+  }
+
+  * from apply {
+    stage: "calibration"
+    bin: "2"
+    finding: "slightly_overconfident"
+  }
+}
+
+-- Bin 3: Low confidence (<0.6) — well calibrated
+link Model <-> GroundTruth priority low {
+  >> { quality: recognizing, priority: 0.8, confidence: 0.5, half_life: 500 }
+     "Bin 3: evaluating low-confidence predictions"
+
+  connect depth deep {
+    signal recognizing 0.8  between data "model predictions with confidence 0.50"
+    signal attending   0.75 between data "ground truth labels"
+  }
+
+  Model ~ GroundTruth until resonating
+
+  => when sync_level > 0.7 depth deep {
+    bin3_predicted_confidence <- "0.50"
+    bin3_actual_accuracy <- "0.52"
+    bin3_gap <- "0.02"
+    bin3_direction <- "well_calibrated"
+  }
+
+  * from apply {
+    stage: "calibration"
+    bin: "3"
+    finding: "well_calibrated"
+  }
+}
+
+-- Calibration analysis
+link GroundTruth <-> Calibrator priority background {
+  >> { quality: questioning, priority: 0.6, confidence: 0.7, half_life: 200 }
+     "Computing Expected Calibration Error"
+
+  connect depth full {
+    signal questioning 0.7 inward data "aggregating calibration gaps"
+  }
+
+  GroundTruth ~ Calibrator until synchronized
+
+  => when sync_level > 0.5 depth deep {
+    bin1_gap_val <- GroundTruth.bin1_gap
+    bin2_gap_val <- GroundTruth.bin2_gap
+    bin3_gap_val <- GroundTruth.bin3_gap
+    expected_calibration_error <- "0.063"
+    recommendation <- "apply temperature scaling T=1.5"
+  }
+
+  * from apply {
+    stage: "analysis"
+    ece: "0.063"
+    method: "temperature_scaling"
+  }
+}

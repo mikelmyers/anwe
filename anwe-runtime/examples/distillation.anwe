@@ -1,0 +1,202 @@
+-- ─────────────────────────────────────────────────────────
+-- KNOWLEDGE DISTILLATION IN ANWE
+--
+-- Teacher (175B) → Student (2B) via 3 lessons:
+--   Lesson 1 (easy) → Lesson 2 (medium) → Lesson 3 (hard)
+--
+-- Curriculum learning via link priorities:
+--   high → normal → low
+-- Half_life decreases per lesson (harder lessons fade faster).
+-- Reject on hard lesson if Student cannot learn.
+-- Student self-link for internal consolidation.
+--
+-- What this proves about ANWE:
+--   - Link priorities as curriculum difficulty
+--   - Half_life as knowledge retention
+--   - Reject as learning failure detection
+--   - Self-link as internal consolidation
+--
+-- BUILDSHEET items covered:
+--   [x] Knowledge distillation (ML Training)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+agent Teacher attention 0.9 external("callback", "teacher") data {
+  model: "GPT-4-175B"
+  parameters: "175B"
+  role: "teacher"
+  temperature: "1.0"
+}
+
+agent Student attention 0.7 external("callback", "student") data {
+  model: "DistilGPT-2B"
+  parameters: "2B"
+  role: "student"
+  temperature: "2.0"
+}
+
+agent Curriculum data {
+  total_lessons: 3
+  progression: "easy → medium → hard"
+  distillation_loss: "KL_divergence"
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 3 within 30000 {
+  permanent Teacher
+  permanent Student
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LESSON 1: Easy examples (high priority, long half_life)
+-- Foundation knowledge transfer.
+-- ═══════════════════════════════════════════════════════════
+
+link Teacher <-> Student priority high {
+  >> { quality: attending, priority: 0.95, confidence: 0.9, half_life: 500 }
+     "Lesson 1 (easy): basic factual knowledge transfer"
+
+  connect depth deep {
+    signal attending   0.9  between data "Teacher demonstrating easy examples"
+    signal recognizing 0.88 inward  data "Student learning basic patterns"
+  }
+
+  Teacher ~ Student until resonating
+
+  <= when confidence <= 0.3 data "Student cannot learn basic patterns — architecture mismatch"
+
+  => when sync_level > 0.7 depth deep {
+    lesson1_topic <- "basic_factual"
+    lesson1_examples <- "1000"
+    lesson1_student_loss <- "1.8"
+    lesson1_teacher_loss <- "0.3"
+    lesson1_kl_divergence <- "1.5"
+    lesson1_student_accuracy <- "0.72"
+  }
+
+  * from apply {
+    stage: "distill"
+    lesson: "1"
+    difficulty: "easy"
+    kl_div: "1.5"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LESSON 2: Medium examples (normal priority, shorter half_life)
+-- Building on foundation with moderate difficulty.
+-- ═══════════════════════════════════════════════════════════
+
+link Teacher <-> Student priority normal {
+  >> { quality: recognizing, priority: 0.8, confidence: 0.8, half_life: 300 }
+     "Lesson 2 (medium): reasoning pattern transfer"
+
+  connect depth deep {
+    signal recognizing 0.82 between data "Teacher demonstrating moderate reasoning"
+    signal attending   0.75 between data Student.lesson1_student_accuracy
+    signal questioning 0.6  inward  data "Student struggling with multi-step reasoning"
+  }
+
+  Teacher ~ Student until resonating
+
+  <= when confidence <= 0.3 data "Student cannot learn medium patterns — capacity limit"
+
+  => when sync_level > 0.7 depth deep {
+    lesson2_topic <- "reasoning_patterns"
+    lesson2_examples <- "500"
+    lesson2_student_loss <- "2.4"
+    lesson2_teacher_loss <- "0.5"
+    lesson2_kl_divergence <- "1.9"
+    lesson2_student_accuracy <- "0.58"
+    lesson2_prior_accuracy <- Student.lesson1_student_accuracy
+  }
+
+  * from apply {
+    stage: "distill"
+    lesson: "2"
+    difficulty: "medium"
+    kl_div: "1.9"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LESSON 3: Hard examples (low priority, shortest half_life)
+-- Advanced knowledge — Student may not fully absorb.
+-- ═══════════════════════════════════════════════════════════
+
+link Teacher <-> Student priority low {
+  >> { quality: questioning, priority: 0.65, confidence: 0.6, half_life: 150 }
+     "Lesson 3 (hard): advanced reasoning transfer"
+
+  connect depth deep {
+    signal questioning 0.65 between data "Teacher demonstrating complex chains"
+    signal disturbed   0.5  inward  data "Student capacity may be insufficient"
+    signal attending   0.6  between data Student.lesson2_student_accuracy
+  }
+
+  Teacher ~ Student until synchronized
+
+  -- Reject: Student cannot absorb hard material
+  <= when confidence <= 0.4 data "Student cannot absorb hard lessons — capacity reached"
+
+  => when sync_level > 0.5 depth deep {
+    lesson3_topic <- "advanced_reasoning"
+    lesson3_examples <- "200"
+    lesson3_student_loss <- "3.1"
+    lesson3_teacher_loss <- "0.8"
+    lesson3_kl_divergence <- "2.3"
+    lesson3_student_accuracy <- "0.41"
+    lesson3_prior_accuracy <- Student.lesson2_student_accuracy
+  }
+
+  * from apply {
+    stage: "distill"
+    lesson: "3"
+    difficulty: "hard"
+    kl_div: "2.3"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- STUDENT SELF-LINK: Internal consolidation
+-- ═══════════════════════════════════════════════════════════
+
+link Student <-> Student priority background {
+  >> { quality: recognizing, priority: 0.3, confidence: 0.7, half_life: 100 }
+     "Student consolidating learned knowledge"
+
+  connect depth full {
+    signal recognizing 0.5 inward data "consolidating patterns from all lessons"
+    signal attending   0.4 inward data "reinforcing easy/medium, accepting loss on hard"
+  }
+
+  Student ~ Student until synchronized
+
+  => when sync_level > 0.3 depth deep {
+    final_accuracy_easy <- Student.lesson1_student_accuracy
+    final_accuracy_medium <- Student.lesson2_student_accuracy
+    final_accuracy_hard <- Student.lesson3_student_accuracy
+    overall_accuracy <- "0.57"
+    compression_ratio <- "87.5x (175B → 2B)"
+    quality_retention <- "63% of teacher performance"
+    distillation_summary <- "easy(72%) → medium(58%) → hard(41%)"
+  }
+
+  * from apply {
+    stage: "consolidation"
+    overall_accuracy: "0.57"
+    compression: "87.5x"
+  }
+}

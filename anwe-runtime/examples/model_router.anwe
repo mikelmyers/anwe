@@ -1,0 +1,202 @@
+-- ─────────────────────────────────────────────────────────
+-- MODEL ROUTER IN ANWE
+--
+-- Classify query complexity, then route to appropriate model:
+--   Query → Classifier → FastModel (simple) or PowerModel (complex)
+--   → Response collects the result.
+--
+-- ANWE's link priorities model routing naturally:
+--   - High priority link for FastModel (quick, cheap)
+--   - Normal priority link for PowerModel (slower, expensive)
+--   - Classifier decides which path based on complexity
+--
+-- What this proves about ANWE:
+--   - Link priority as routing weight
+--   - FieldAccess reads classifier decision
+--   - Reject gates drop inappropriate routes
+--   - Converge collects from whichever model responds
+--
+-- BUILDSHEET items covered:
+--   [x] Model routing (LLM Patterns)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+-- Incoming user query
+agent Query data {
+  text: "Explain the attention mechanism in transformers with mathematical derivation"
+  type: "unknown"
+  tokens: 12
+}
+
+-- Classifier determines complexity
+agent Classifier attention 0.9 external("callback", "classifier") data {
+  role: "complexity_classifier"
+  categories: "simple, moderate, complex"
+}
+
+-- Fast model for simple queries (7B params)
+agent FastModel attention 0.7 external("callback", "fast_model") data {
+  model: "llama-7b"
+  max_tokens: 256
+  latency: "50ms"
+  cost_per_token: "0.001"
+}
+
+-- Power model for complex queries (70B params)
+agent PowerModel attention 0.8 external("callback", "power_model") data {
+  model: "llama-70b"
+  max_tokens: 2048
+  latency: "500ms"
+  cost_per_token: "0.01"
+}
+
+-- Collected response
+agent Response data {
+  status: "pending"
+  routed_to: "unknown"
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 3 within 15000 {
+  permanent Classifier
+  permanent FastModel
+  permanent PowerModel
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- CLASSIFY: Query → Classifier
+-- Determine query complexity.
+-- ═══════════════════════════════════════════════════════════
+
+link Query <-> Classifier priority critical {
+  >> { quality: attending, priority: 1.0, confidence: 0.95, half_life: 300 }
+     "Classifying query complexity"
+
+  connect depth deep {
+    signal attending   0.95 between data "analyzing query: transformer attention mechanism"
+    signal recognizing 0.9  inward  data "detected: mathematical derivation request"
+  }
+
+  Query ~ Classifier until resonating
+
+  => when sync_level > 0.7 depth deep {
+    complexity <- "complex"
+    reasoning <- "mathematical derivation requires detailed explanation"
+    route_to <- "PowerModel"
+    classification_confidence <- "0.93"
+  }
+
+  * from apply {
+    stage: "classify"
+    complexity: "complex"
+    route: "PowerModel"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- ROUTE A: Classifier → FastModel (high priority, quick)
+-- Reject gate drops this if query is complex.
+-- ═══════════════════════════════════════════════════════════
+
+link Classifier <-> FastModel priority high {
+  >> { quality: recognizing, priority: 0.9, confidence: 0.7, half_life: 200 }
+     "Route A: Attempting fast model for quick response"
+
+  connect depth partial {
+    signal recognizing 0.7  between data "checking if fast model can handle this query"
+    signal questioning 0.6  inward  data Classifier.complexity
+  }
+
+  Classifier ~ FastModel until resonating
+
+  -- Reject: query too complex for fast model
+  <= when confidence <= 0.5 data "query too complex for fast model — routing to power model"
+
+  => when sync_level > 0.7 depth deep {
+    fast_answer <- "Attention computes weighted sums of values based on query-key similarity."
+    fast_tokens <- "128"
+    fast_latency <- "45ms"
+    fast_confidence <- "0.65"
+  }
+
+  * from apply {
+    stage: "generate"
+    model: "fast"
+    tokens: 128
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- ROUTE B: Classifier → PowerModel (normal priority, thorough)
+-- Handles complex queries with full reasoning.
+-- ═══════════════════════════════════════════════════════════
+
+link Classifier <-> PowerModel priority normal {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.9, half_life: 400 }
+     "Route B: Power model for detailed response"
+
+  connect depth deep {
+    signal recognizing 0.9  between data "engaging power model for complex query"
+    signal attending   0.85 between data Classifier.route_to
+  }
+
+  Classifier ~ PowerModel until resonating
+
+  <= when confidence <= 0.3 data "power model also failed — escalate to human"
+
+  => when sync_level > 0.7 depth deep {
+    power_answer <- "Attention(Q,K,V) = softmax(QK^T / sqrt(d_k))V. The scaled dot-product attention computes compatibility between queries and keys, normalizes via softmax, then uses these weights to combine values. Multi-head attention runs h parallel heads: MultiHead = Concat(head_1,...,head_h)W^O where head_i = Attention(QW_i^Q, KW_i^K, VW_i^V)."
+    power_tokens <- "1024"
+    power_latency <- "480ms"
+    power_confidence <- "0.94"
+  }
+
+  * from apply {
+    stage: "generate"
+    model: "power"
+    tokens: 1024
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- COLLECT: Models → Response
+-- ═══════════════════════════════════════════════════════════
+
+link PowerModel <-> Response priority background {
+  >> { quality: recognizing, priority: 0.5, confidence: 0.8, half_life: 100 }
+     "Collecting routed model response"
+
+  connect depth full {
+    signal recognizing 0.6 between data "assembling final response"
+  }
+
+  PowerModel ~ Response until synchronized
+
+  => when sync_level > 0.3 depth deep {
+    final_answer <- PowerModel.power_answer
+    final_confidence <- PowerModel.power_confidence
+    model_used <- "PowerModel (llama-70b)"
+    routing_decision <- Classifier.complexity
+    tokens_used <- PowerModel.power_tokens
+    latency <- PowerModel.power_latency
+    cost_saved <- "routed complex query directly to power model"
+  }
+
+  * from apply {
+    stage: "response"
+    model: "power"
+    routed_correctly: "true"
+  }
+}

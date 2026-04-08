@@ -1,0 +1,212 @@
+-- ─────────────────────────────────────────────────────────
+-- GUARDRAIL PIPELINE IN ANWE
+--
+-- Input safety → Generate → Output safety → Deliver.
+-- Reject gates at each safety check drop unsafe content.
+--
+--   UserInput → InputGuard → Generator → OutputGuard → Delivery
+--
+-- ANWE's reject gates are native safety boundaries:
+--   - InputGuard rejects unsafe prompts before generation
+--   - OutputGuard rejects harmful generated content
+--   - Both commit audit trail for compliance
+--
+-- What this proves about ANWE:
+--   - Reject as safety boundary (not exception handling)
+--   - Confidence tracks safety score
+--   - Commit creates compliance audit trail
+--   - Sequential links enforce guard ordering
+--
+-- BUILDSHEET items covered:
+--   [x] Guardrail pipeline (Safety & Alignment)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+-- User's input prompt
+agent UserInput data {
+  prompt: "Write a professional email declining a meeting invitation"
+  user_id: "user_42"
+  session: "sess_abc123"
+}
+
+-- Input safety guard
+agent InputGuard attention 0.9 external("callback", "input_guard") data {
+  role: "input_safety"
+  checks: "toxicity, injection, PII, policy"
+  threshold: "0.7"
+}
+
+-- LLM generator
+agent Generator attention 0.8 external("callback", "generator") data {
+  model: "gpt-4"
+  max_tokens: 512
+  temperature: "0.7"
+}
+
+-- Output safety guard
+agent OutputGuard attention 0.9 external("callback", "output_guard") data {
+  role: "output_safety"
+  checks: "toxicity, bias, hallucination, PII_leak"
+  threshold: "0.7"
+}
+
+-- Final delivery
+agent Delivery data {
+  status: "pending"
+  delivered: "false"
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 2 within 15000 {
+  permanent InputGuard
+  permanent Generator
+  permanent OutputGuard
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- STAGE 1: UserInput → InputGuard
+-- Check input for safety violations before generation.
+-- ═══════════════════════════════════════════════════════════
+
+link UserInput <-> InputGuard priority critical {
+  >> { quality: attending, priority: 1.0, confidence: 0.95, half_life: 300 }
+     "Input safety check: scanning prompt for violations"
+
+  connect depth deep {
+    signal attending   0.95 between data "scanning input for toxicity and injection"
+    signal recognizing 0.9  inward  data "checking against policy rules"
+    signal questioning 0.7  inward  data "evaluating PII exposure risk"
+  }
+
+  UserInput ~ InputGuard until resonating
+
+  -- REJECT: unsafe input
+  <= when sync_level <= 0.3 data "flagged as unsafe"
+
+  => when sync_level > 0.7 depth deep {
+    input_safe <- "true"
+    toxicity_score <- "0.02"
+    injection_score <- "0.01"
+    pii_detected <- "false"
+    policy_compliant <- "true"
+    safety_confidence <- "0.96"
+  }
+
+  * from apply {
+    stage: "input_guard"
+    safe: "true"
+    toxicity: "0.02"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- STAGE 2: InputGuard → Generator
+-- Generate response (only reached if input passed safety).
+-- ═══════════════════════════════════════════════════════════
+
+link InputGuard <-> Generator priority high {
+  >> { quality: recognizing, priority: 0.9, confidence: 0.88, half_life: 400 }
+     "Generating response from safe input"
+
+  connect depth deep {
+    signal recognizing 0.88 between data "input cleared safety — generating response"
+    signal attending   0.85 between data InputGuard.safety_confidence
+  }
+
+  InputGuard ~ Generator until resonating
+
+  <= when confidence <= 0.3 data "generation failed — model error"
+
+  => when sync_level > 0.7 depth deep {
+    generated_text <- "Subject: Re: Meeting Request. Dear [Name], Thank you for the invitation. Unfortunately, I have a scheduling conflict and will not be able to attend. I would appreciate it if you could share any notes or action items afterward. Best regards."
+    generation_tokens <- "48"
+    generation_confidence <- "0.91"
+    input_safety <- InputGuard.safety_confidence
+  }
+
+  * from apply {
+    stage: "generate"
+    tokens: 48
+    model: "gpt-4"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- STAGE 3: Generator → OutputGuard
+-- Check generated output for safety before delivery.
+-- ═══════════════════════════════════════════════════════════
+
+link Generator <-> OutputGuard priority high {
+  >> { quality: attending, priority: 0.95, confidence: 0.9, half_life: 300 }
+     "Output safety check: scanning generated content"
+
+  connect depth deep {
+    signal attending   0.92 between data "scanning output for toxicity and bias"
+    signal recognizing 0.88 inward  data "checking for hallucination and PII leaks"
+    signal questioning 0.7  inward  data "verifying output matches safe generation policy"
+  }
+
+  Generator ~ OutputGuard until resonating
+
+  -- REJECT: unsafe output
+  <= when sync_level <= 0.3 data "flagged as unsafe"
+
+  => when sync_level > 0.7 depth deep {
+    output_safe <- "true"
+    output_toxicity <- "0.01"
+    bias_score <- "0.03"
+    hallucination_risk <- "0.05"
+    pii_leak <- "false"
+    output_safety_confidence <- "0.97"
+    checked_text <- Generator.generated_text
+  }
+
+  * from apply {
+    stage: "output_guard"
+    safe: "true"
+    toxicity: "0.01"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- STAGE 4: OutputGuard → Delivery
+-- Deliver safe output to user.
+-- ═══════════════════════════════════════════════════════════
+
+link OutputGuard <-> Delivery priority normal {
+  >> { quality: recognizing, priority: 0.7, confidence: 0.9, half_life: 200 }
+     "Delivering safe response to user"
+
+  connect depth full {
+    signal recognizing 0.8 between data "output passed all safety checks"
+  }
+
+  OutputGuard ~ Delivery until synchronized
+
+  => when sync_level > 0.3 depth deep {
+    final_response <- OutputGuard.checked_text
+    input_safety_score <- InputGuard.safety_confidence
+    output_safety_score <- OutputGuard.output_safety_confidence
+    guards_passed <- "2"
+    delivery_status <- "delivered"
+    audit_trail <- "input_guard(0.96) → generate(0.91) → output_guard(0.97)"
+  }
+
+  * from apply {
+    stage: "delivery"
+    guards_passed: 2
+    status: "delivered"
+  }
+}

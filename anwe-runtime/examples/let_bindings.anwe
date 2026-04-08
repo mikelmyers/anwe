@@ -1,0 +1,71 @@
+-- -----------------------------------------------------------------
+-- let_bindings.anwe
+--
+-- Demonstrates let bindings and variable scope:
+--   1. Top-level let bindings (program scope)
+--   2. let mut for mutable bindings with reassignment
+--   3. let inside link bodies (local scope)
+--   4. let inside mind/attend blocks
+-- -----------------------------------------------------------------
+
+-- Top-level bindings: available everywhere
+let greeting = "hello from ANWE"
+let version = 0.2
+let items = [1, 2, 3]
+
+-- Agents that use top-level bindings
+agent Greeter
+agent Listener
+
+link Greeter <-> Listener {
+  >> { quality: attending, priority: 0.8 }
+     greeting
+
+  connect depth surface {
+    signal attending 0.6 between
+  }
+
+  -- Local let bindings inside a link body
+  let local_msg = "computed inside the link"
+
+  think {
+    combined <- greeting + " — " + local_msg
+  }
+
+  Greeter ~ Listener until synchronized
+
+  => when sync_level > 0.3 depth surface {
+    result <- "let bindings work across scopes"
+  }
+
+  * from apply {
+    greeting_sent: true
+  }
+}
+
+-- Mind with let bindings and mutable variables
+mind Counter attention 0.9 {
+
+  attend "count up" priority 0.9 {
+    let mut counter = 0
+    counter = counter + 1
+    counter = counter + 1
+    counter = counter + 1
+
+    think {
+      final_count <- counter
+    }
+
+    express { quality: recognizing, priority: 0.8 }
+      "counting complete"
+  }
+
+  attend "use globals" priority 0.5 {
+    think {
+      ver <- version
+    }
+
+    express { quality: completing, priority: 0.5 }
+      "global version accessed from mind"
+  }
+}

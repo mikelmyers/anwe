@@ -1,0 +1,223 @@
+-- ─────────────────────────────────────────────────────────
+-- ANOMALY DETECTION IN ANWE
+--
+-- Flag unusual patterns in data streams.
+-- ANWE's "disturbed" signal quality is native anomaly:
+-- the system feels when something deviates from baseline.
+--
+-- BUILDSHEET items covered:
+--   [x] Anomaly detection (Perception & Sensors)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+-- Baseline model that learns normal patterns
+agent BaselineModel attention 0.7 data {
+  metric: "api_latency_ms"
+  window_size: 1000
+  mean: 45.2
+  std_dev: 8.3
+  samples_seen: 50000
+  last_updated: "tick_49000"
+}
+
+-- Incoming data stream
+agent DataStream attention 0.5 external("callback", "metrics") data {
+  source: "inference-api"
+  sample_rate_hz: 10
+  buffer_size: 100
+  current_readings: [44, 47, 42, 48, 43, 46, 45, 120, 135, 142, 89, 44, 43]
+}
+
+-- Anomaly scorer
+agent AnomalyScorer attention 0.9 data {
+  z_score_threshold: 3.0
+  consecutive_threshold: 3
+  current_score: 0.0
+  consecutive_anomalies: 0
+}
+
+-- Pattern classifier
+agent PatternClassifier attention 0.8 data {
+  known_patterns: ["spike", "drift", "level_shift", "seasonality", "noise"]
+  classification: ""
+  confidence: 0.0
+}
+
+-- Alert generator
+agent AnomalyAlert data {
+  severity: "none"
+  description: ""
+  recommended_action: ""
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 5 within 30000 {
+  BaselineModel
+  AnomalyScorer
+  PatternClassifier
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LINKS
+-- ═══════════════════════════════════════════════════════════
+
+-- Stream readings through baseline model
+link DataStream <-> BaselineModel priority high continuous {
+  >> { quality: attending, priority: 0.8, confidence: 0.9, half_life: 50 }
+     "Comparing readings against learned baseline"
+
+  connect depth full {
+    signal attending   0.8 between data "streaming metric data"
+    signal recognizing 0.7 inward  data "baseline comparison"
+  }
+
+  DataStream ~ BaselineModel until synchronized
+
+  each reading in DataStream.current_readings {
+    => when sync_level > 0.5 depth partial {
+      value <- reading
+      baseline_mean <- 45.2
+      baseline_std <- 8.3
+    }
+  }
+
+  => when sync_level > 0.7 depth deep {
+    readings_processed <- 13
+    normal_count <- 10
+    anomalous_count <- 3
+    anomalous_values <- [120, 135, 142]
+    max_deviation <- 11.7
+  }
+
+  * from apply {
+    stage: "baseline_comparison"
+    anomalies: 3
+  }
+}
+
+-- Score anomalies
+link BaselineModel <-> AnomalyScorer priority high {
+  >> { quality: disturbed, priority: 0.9, confidence: 0.85, half_life: 100 }
+     "Scoring anomalous readings"
+
+  connect depth deep {
+    signal disturbed   0.9  between data "deviation detected"
+    signal questioning 0.85 inward  data "how anomalous is this"
+  }
+
+  BaselineModel ~ AnomalyScorer until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    z_score_120 <- 9.0
+    z_score_135 <- 10.8
+    z_score_142 <- 11.7
+    max_z_score <- 11.7
+    consecutive_anomalies <- 3
+    exceeds_threshold <- "true"
+    anomaly_confirmed <- "true"
+    severity <- "high"
+  }
+
+  <= when confidence <= 0.3 data "readings within baseline — no anomaly"
+
+  * from apply {
+    stage: "scoring"
+    confirmed: "true"
+    severity: "high"
+  }
+}
+
+-- Classify the anomaly pattern
+link AnomalyScorer <-> PatternClassifier priority high {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.8, half_life: 200 }
+     "Classifying anomaly pattern"
+
+  connect depth deep {
+    signal recognizing 0.85 between data "pattern analysis"
+    signal questioning 0.8  inward  data "what kind of anomaly"
+  }
+
+  AnomalyScorer ~ PatternClassifier until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    pattern <- "spike"
+    confidence <- 0.89
+    characteristics <- "sudden increase, 3 consecutive readings, then return to baseline"
+    possible_causes <- ["resource_exhaustion", "GC_pause", "upstream_timeout"]
+    duration_estimate <- "transient (< 1 second)"
+  }
+
+  * from apply {
+    stage: "classification"
+    pattern: "spike"
+  }
+}
+
+-- Generate alert
+link PatternClassifier <-> AnomalyAlert priority high {
+  >> { quality: applying, priority: 0.9, confidence: 0.85, half_life: 200 }
+     "Generating anomaly alert"
+
+  connect depth deep {
+    signal applying    0.9  between data "alert generation"
+    signal recognizing 0.85 inward  data "recommended action"
+  }
+
+  PatternClassifier ~ AnomalyAlert until synchronized
+
+  if PatternClassifier.confidence > 0.7 {
+    => when sync_level > 0.7 depth deep {
+      severity <- "high"
+      description <- "Latency spike detected: 3 consecutive readings at 120-142ms (baseline: 45ms, z-score: 11.7)"
+      pattern <- "spike"
+      recommended_action <- "Check for GC pauses or upstream timeouts. If recurring, investigate resource exhaustion."
+      auto_remediation <- "scale_workers"
+    }
+  } else {
+    => when sync_level > 0.5 depth partial {
+      severity <- "low"
+      description <- "Possible anomaly detected but pattern unclear"
+      recommended_action <- "Continue monitoring"
+    }
+  }
+
+  * from apply {
+    stage: "alert"
+    severity: "high"
+  }
+}
+
+-- Update baseline with new data (excluding anomalies)
+link AnomalyScorer <-> BaselineModel priority low {
+  >> { quality: applying, priority: 0.5, confidence: 0.95, half_life: 500 }
+     "Updating baseline with normal readings"
+
+  connect depth partial {
+    signal applying 0.5 between data "baseline update"
+  }
+
+  AnomalyScorer ~ BaselineModel until synchronized
+
+  => when sync_level > 0.5 depth partial {
+    readings_added_to_baseline <- 10
+    anomalies_excluded <- 3
+    new_mean <- 45.1
+    new_std <- 8.2
+    samples_total <- 50010
+  }
+
+  * from apply {
+    stage: "baseline_update"
+    added: 10
+    excluded: 3
+  }
+}

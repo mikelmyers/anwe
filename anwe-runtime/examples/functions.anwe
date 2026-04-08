@@ -1,0 +1,59 @@
+-- Functions in ANWE
+--
+-- Functions are first-class values. Define with fn or as lambdas.
+
+-- Named function declarations
+
+fn double(x) = x + x
+
+fn greet(name) = "Hello, " + name + "!"
+
+fn add(a, b) = a + b
+
+fn clamp_score(val) = clamp(val, 0, 100)
+
+-- Functions calling other functions
+
+fn quadruple(x) = double(double(x))
+
+-- Functions using builtins
+
+fn shout(s) = upper(s)
+
+fn whisper(s) = lower(s)
+
+-- Block-body syntax
+
+fn describe(x) {
+    "The value is: " + to_string(x)
+}
+
+-- Let bindings using functions
+
+let greeting = greet("ANWE")
+let result = quadruple(5)
+let loud = shout("attention")
+let score = clamp_score(150)
+
+-- Lambdas
+
+let increment = |x| x + 1
+let concat_words = |a, b| a + " " + b
+
+let five = increment(4)
+let phrase = concat_words("minds", "awaken")
+
+-- Functions in agents
+
+fn format_signal(quality) = "signal:" + to_string(quality)
+
+agent Sender
+agent Receiver
+
+link Sender <-> Receiver {
+    >> format_signal(0.9)
+    connect depth surface {
+        signal attending 0.8 between
+    }
+    Sender ~ Receiver until synchronized
+}

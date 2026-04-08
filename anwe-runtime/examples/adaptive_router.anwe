@@ -1,0 +1,127 @@
+-- ADAPTIVE ROUTER IN ANWE
+-- Route queries to models based on complexity + cost + performance history.
+
+agent Query data {
+  text: "Explain quantum entanglement"
+  complexity: 0.85
+  token_estimate: 500
+}
+
+agent Router attention 0.9 external("callback", "router") data {
+  models: ["fast_7b", "balanced_13b", "premium_70b"]
+  cost_weight: 0.3
+  quality_weight: 0.7
+}
+
+agent FastModel external("callback", "fast") data {
+  name: "fast_7b"
+  cost_per_1k: 0.01
+  avg_quality: 0.72
+}
+
+agent PremiumModel external("callback", "premium") data {
+  name: "premium_70b"
+  cost_per_1k: 0.15
+  avg_quality: 0.95
+}
+
+agent Result data {
+  response: ""
+  model_used: ""
+}
+
+link Query <-> Router priority high {
+  >> { quality: attending, priority: 0.95, confidence: 0.9, half_life: 200 }
+     "Routing query based on complexity"
+
+  connect depth full {
+    signal attending   0.9  between data "analyzing query complexity"
+    signal recognizing 0.85 inward  data "checking model availability"
+  }
+
+  Query ~ Router until synchronized
+
+  if confidence > 0.7 {
+    => when sync_level > 0.7 depth deep {
+      selected_model <- "premium_70b"
+      routing_reason <- "high complexity (0.85) exceeds fast model capability"
+      estimated_cost <- 0.075
+    }
+  } else {
+    => when sync_level > 0.5 depth partial {
+      selected_model <- "fast_7b"
+      routing_reason <- "low complexity, fast model sufficient"
+      estimated_cost <- 0.005
+    }
+  }
+
+  * from apply {
+    stage: "routing"
+    decision: "premium_70b"
+  }
+}
+
+link Router <-> FastModel priority low {
+  >> { quality: attending, priority: 0.4, confidence: 0.3, half_life: 100 }
+     "Fast model on standby (not selected)"
+
+  connect depth surface {
+    signal attending 0.3 between data "standby"
+  }
+
+  Router ~ FastModel until synchronized
+
+  <= when confidence <= 0.5 data "query too complex for fast model"
+
+  * from reject {
+    stage: "routing"
+    action: "fast_model_bypassed"
+  }
+}
+
+link Router <-> PremiumModel priority high {
+  >> { quality: recognizing, priority: 0.9, confidence: 0.92, half_life: 200 }
+     "Premium model processing complex query"
+
+  connect depth deep {
+    signal recognizing 0.9  between data "processing quantum physics query"
+    signal attending   0.85 inward  data "generating detailed explanation"
+  }
+
+  Router ~ PremiumModel until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    response <- "Quantum entanglement is a phenomenon..."
+    tokens_used <- 487
+    actual_cost <- 0.073
+    quality_score <- 0.94
+  }
+
+  * from apply {
+    stage: "inference"
+    model: "premium_70b"
+  }
+}
+
+link PremiumModel <-> Result priority normal {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.9, half_life: 300 }
+     "Delivering result"
+
+  connect depth deep {
+    signal recognizing 0.9 between data "result ready"
+  }
+
+  PremiumModel ~ Result until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    final_response <- "Quantum entanglement explanation delivered"
+    model_used <- "premium_70b"
+    total_cost <- 0.073
+    quality_achieved <- 0.94
+  }
+
+  * from apply {
+    stage: "delivery"
+    status: "complete"
+  }
+}

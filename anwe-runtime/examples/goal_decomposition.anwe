@@ -1,0 +1,296 @@
+-- ─────────────────────────────────────────────────────────
+-- GOAL DECOMPOSITION IN ANWE
+--
+-- Break a high-level goal into sub-goals.
+-- Sub-goals managed by supervision tree.
+-- Each sub-goal can independently succeed or fail.
+--
+-- ANWE's supervision trees are native goal management:
+--   - Top-level goal supervises sub-goals
+--   - one_for_all: if any sub-goal fails, restart all
+--   - rest_for_one: downstream sub-goals restart
+--   - Reject cancels a sub-goal without killing others
+--
+-- What this proves about ANWE:
+--   - Supervision as goal management (not just error recovery)
+--   - Link priorities as sub-goal importance
+--   - FieldAccess tracks sub-goal progress
+--   - Commit marks sub-goal completion
+--
+-- BUILDSHEET items covered:
+--   [x] Goal decomposition (Reasoning & Planning)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- TOP-LEVEL GOAL
+-- ═══════════════════════════════════════════════════════════
+
+agent Goal data {
+  description: "Build and launch a customer support chatbot"
+  status: "decomposing"
+  deadline: "Q2 2024"
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUB-GOALS (managed by supervision)
+-- ═══════════════════════════════════════════════════════════
+
+agent SubGoal_Data attention 0.8 external("callback", "data") data {
+  task: "Collect and prepare training data"
+  priority: "critical_path"
+  status: "pending"
+}
+
+agent SubGoal_Model attention 0.7 external("callback", "model") data {
+  task: "Train and evaluate the model"
+  priority: "critical_path"
+  status: "pending"
+}
+
+agent SubGoal_Integration attention 0.6 data {
+  task: "Integrate with customer support platform"
+  priority: "critical_path"
+  status: "pending"
+}
+
+agent SubGoal_Testing attention 0.5 data {
+  task: "End-to-end testing and UAT"
+  priority: "required"
+  status: "pending"
+}
+
+agent SubGoal_Docs attention 0.3 data {
+  task: "Write documentation and runbooks"
+  priority: "nice_to_have"
+  status: "pending"
+}
+
+-- Progress tracker
+agent Progress data {
+  total_subgoals: 5
+  completed: 0
+  status: "in_progress"
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION TREE
+--
+-- rest_for_one: if Data fails, everything downstream restarts.
+-- This models goal dependencies: Model depends on Data,
+-- Integration depends on Model, etc.
+-- ═══════════════════════════════════════════════════════════
+
+supervise rest_for_one max_restarts 3 within 30000 {
+  permanent SubGoal_Data
+  permanent SubGoal_Model
+  transient SubGoal_Integration
+  transient SubGoal_Testing
+  temporary SubGoal_Docs
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUB-GOAL 1: Collect training data
+-- Critical path. Must succeed for everything else.
+-- ═══════════════════════════════════════════════════════════
+
+link Goal <-> SubGoal_Data priority critical {
+  >> { quality: attending, priority: 1.0, confidence: 0.85, half_life: 500 }
+     "Sub-goal 1: Collect and prepare training data"
+
+  connect depth deep {
+    signal attending   0.9  between data "collecting customer support conversations"
+    signal recognizing 0.85 inward  data "cleaning and labeling training data"
+  }
+
+  Goal ~ SubGoal_Data until resonating
+
+  <= when confidence <= 0.3 data "data collection failed — cannot proceed"
+
+  => when sync_level > 0.7 depth deep {
+    data_status <- "complete"
+    data_samples <- "15000"
+    data_quality <- "0.87"
+    data_categories <- "5"
+    data_confidence <- "0.88"
+  }
+
+  * from apply {
+    stage: "subgoal"
+    goal: "data_collection"
+    status: "complete"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUB-GOAL 2: Train model (depends on data)
+-- ═══════════════════════════════════════════════════════════
+
+link SubGoal_Data <-> SubGoal_Model priority high {
+  >> { quality: recognizing, priority: 0.9, confidence: 0.82, half_life: 400 }
+     "Sub-goal 2: Train chatbot model"
+
+  connect depth deep {
+    signal recognizing 0.85 between data "training on prepared data"
+    signal attending   0.8  between data SubGoal_Data.data_quality
+    signal questioning 0.6  inward  data "will model quality be sufficient?"
+  }
+
+  SubGoal_Data ~ SubGoal_Model until resonating
+
+  <= when confidence <= 0.3 data "model training failed — need more data or different architecture"
+
+  => when sync_level > 0.7 depth deep {
+    model_status <- "complete"
+    model_accuracy <- "0.91"
+    model_latency <- "120ms"
+    model_confidence <- "0.85"
+    data_dependency <- SubGoal_Data.data_confidence
+  }
+
+  * from apply {
+    stage: "subgoal"
+    goal: "model_training"
+    status: "complete"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUB-GOAL 3: Platform integration (depends on model)
+-- ═══════════════════════════════════════════════════════════
+
+link SubGoal_Model <-> SubGoal_Integration priority normal {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.78, half_life: 300 }
+     "Sub-goal 3: Integrate with support platform"
+
+  connect depth deep {
+    signal recognizing 0.8  between data "connecting model API to platform"
+    signal questioning 0.65 inward  data "API compatibility uncertain"
+  }
+
+  SubGoal_Model ~ SubGoal_Integration until resonating
+
+  <= when confidence <= 0.3 data "integration failed — API incompatibility"
+
+  => when sync_level > 0.7 depth deep {
+    integration_status <- "complete"
+    integration_api <- "REST"
+    integration_latency <- "180ms"
+    integration_confidence <- "0.80"
+    model_dependency <- SubGoal_Model.model_confidence
+  }
+
+  * from apply {
+    stage: "subgoal"
+    goal: "integration"
+    status: "complete"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUB-GOAL 4: End-to-end testing
+-- ═══════════════════════════════════════════════════════════
+
+link SubGoal_Integration <-> SubGoal_Testing priority normal {
+  >> { quality: recognizing, priority: 0.8, confidence: 0.75, half_life: 200 }
+     "Sub-goal 4: End-to-end testing"
+
+  connect depth deep {
+    signal recognizing 0.75 between data "running end-to-end test suite"
+    signal questioning 0.7  inward  data "checking for edge cases"
+  }
+
+  SubGoal_Integration ~ SubGoal_Testing until resonating
+
+  <= when confidence <= 0.3 data "testing failed — critical bugs found"
+
+  => when sync_level > 0.7 depth deep {
+    testing_status <- "complete"
+    tests_passed <- "142"
+    tests_failed <- "3"
+    testing_confidence <- "0.82"
+    integration_dependency <- SubGoal_Integration.integration_confidence
+  }
+
+  * from apply {
+    stage: "subgoal"
+    goal: "testing"
+    status: "complete_with_issues"
+    passed: 142
+    failed: 3
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUB-GOAL 5: Documentation (lowest priority, can be skipped)
+-- ═══════════════════════════════════════════════════════════
+
+link SubGoal_Testing <-> SubGoal_Docs priority low {
+  >> { quality: attending, priority: 0.6, confidence: 0.7, half_life: 100 }
+     "Sub-goal 5: Write documentation"
+
+  connect depth partial {
+    signal attending   0.6  between data "writing user guide and runbooks"
+    signal recognizing 0.5  inward  data "documenting API and troubleshooting"
+  }
+
+  SubGoal_Testing ~ SubGoal_Docs until synchronized
+
+  => when sync_level > 0.5 depth partial {
+    docs_status <- "complete"
+    docs_pages <- "12"
+    docs_confidence <- "0.75"
+    testing_dependency <- SubGoal_Testing.testing_confidence
+  }
+
+  * from apply {
+    stage: "subgoal"
+    goal: "documentation"
+    status: "complete"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- PROGRESS: Track all sub-goals
+-- ═══════════════════════════════════════════════════════════
+
+link SubGoal_Docs <-> Progress priority background {
+  >> { quality: recognizing, priority: 0.4, confidence: 0.6, half_life: 50 }
+     "Tracking overall goal progress"
+
+  connect depth full {
+    signal recognizing 0.5 between data "aggregating sub-goal completions"
+  }
+
+  SubGoal_Docs ~ Progress until synchronized
+
+  => when sync_level > 0.3 depth deep {
+    data_done <- SubGoal_Data.data_status
+    model_done <- SubGoal_Model.model_status
+    integration_done <- SubGoal_Integration.integration_status
+    testing_done <- SubGoal_Testing.testing_status
+    docs_done <- SubGoal_Docs.docs_status
+    completed_count <- "5"
+    total_count <- "5"
+    overall_status <- "all sub-goals complete"
+    overall_confidence <- "0.82"
+    critical_path <- "data → model → integration → testing"
+    lowest_confidence <- "0.75 (documentation)"
+    supervision_restarts <- "0"
+  }
+
+  * from apply {
+    stage: "progress"
+    completed: 5
+    total: 5
+    status: "goal_achieved"
+  }
+}

@@ -1,0 +1,232 @@
+-- ─────────────────────────────────────────────────────────
+-- LONG-TERM MEMORY CONSOLIDATION IN ANWE
+--
+-- Background process merges and prunes memories.
+-- Short-term memories with low confidence get pruned.
+-- Related memories get merged (consolidated).
+-- Important memories get reinforced (higher half_life).
+--
+-- ANWE's commit + half_life enables this:
+--   - Memories with short half_life fade naturally
+--   - Background links run consolidation
+--   - Apply merges related memories
+--   - Commit persists the consolidated result
+--
+-- What this proves about ANWE:
+--   - Half_life as natural memory decay (not cron jobs)
+--   - Background priority as maintenance process
+--   - Apply as memory transformation
+--   - Commit as persistence boundary
+--
+-- BUILDSHEET items covered:
+--   [x] Long-term memory consolidation (Memory & Knowledge)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- MEMORY AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+-- Short-term memory store (recent, high detail, fast decay)
+agent ShortTermStore attention 0.8 data {
+  capacity: 100
+  type: "short_term"
+  decay_rate: "fast"
+}
+
+-- Long-term memory store (older, compressed, slow decay)
+agent LongTermStore attention 0.5 data {
+  capacity: 10000
+  type: "long_term"
+  decay_rate: "slow"
+}
+
+-- Consolidation process (background maintenance)
+agent Consolidator attention 0.3 external("callback", "consolidator") data {
+  strategy: "merge_related_prune_weak"
+  merge_threshold: "0.7"
+  prune_threshold: "0.2"
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 3 within 30000 {
+  permanent Consolidator
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- MEMORY 1: Recent conversation (high confidence, short half_life)
+-- ═══════════════════════════════════════════════════════════
+
+link ShortTermStore <-> ShortTermStore priority normal {
+  >> { quality: recognizing, priority: 0.8, confidence: 0.9, half_life: 100 }
+     "Memory 1: user asked about weather yesterday"
+
+  connect depth partial {
+    signal recognizing 0.9  inward data "storing: user interested in weather"
+    signal attending   0.85 inward data "topic: weather, time: yesterday"
+  }
+
+  ShortTermStore ~ ShortTermStore until synchronized
+
+  => when sync_level > 0.5 depth partial {
+    mem1_content <- "user asked about weather in San Francisco"
+    mem1_topic <- "weather"
+    mem1_confidence <- "0.9"
+    mem1_age <- "1 day"
+    mem1_access_count <- "2"
+  }
+
+  * from apply {
+    stage: "store"
+    memory: "1"
+    type: "short_term"
+    half_life: 100
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- MEMORY 2: Related conversation (same topic, slightly older)
+-- ═══════════════════════════════════════════════════════════
+
+link ShortTermStore <-> ShortTermStore priority normal {
+  >> { quality: recognizing, priority: 0.75, confidence: 0.8, half_life: 80 }
+     "Memory 2: user mentioned travel plans last week"
+
+  connect depth partial {
+    signal recognizing 0.8  inward data "storing: user planning trip"
+    signal attending   0.75 inward data "topic: travel, destination: San Francisco"
+  }
+
+  ShortTermStore ~ ShortTermStore until synchronized
+
+  => when sync_level > 0.5 depth partial {
+    mem2_content <- "user planning trip to San Francisco next month"
+    mem2_topic <- "travel"
+    mem2_confidence <- "0.75"
+    mem2_age <- "5 days"
+    mem2_access_count <- "1"
+  }
+
+  * from apply {
+    stage: "store"
+    memory: "2"
+    type: "short_term"
+    half_life: 80
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- MEMORY 3: Weak memory (low confidence, should be pruned)
+-- ═══════════════════════════════════════════════════════════
+
+link ShortTermStore <-> ShortTermStore priority low {
+  >> { quality: attending, priority: 0.5, confidence: 0.3, half_life: 30 }
+     "Memory 3: user briefly mentioned something about food"
+
+  connect depth partial {
+    signal attending  0.4  inward data "vague reference to food preferences"
+    signal disturbed  0.3  inward data "low confidence — may have misheard"
+  }
+
+  ShortTermStore ~ ShortTermStore until synchronized
+
+  => when sync_level > 0.5 depth partial {
+    mem3_content <- "user may have mentioned liking sushi"
+    mem3_topic <- "food"
+    mem3_confidence <- "0.25"
+    mem3_age <- "7 days"
+    mem3_access_count <- "0"
+  }
+
+  * from apply {
+    stage: "store"
+    memory: "3"
+    type: "short_term"
+    half_life: 30
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- CONSOLIDATION: Merge related, prune weak
+--
+-- Background priority: runs as maintenance.
+-- Reads all memories via FieldAccess.
+-- Merges memories 1+2 (both about San Francisco).
+-- Prunes memory 3 (below confidence threshold).
+-- ═══════════════════════════════════════════════════════════
+
+link ShortTermStore <-> Consolidator priority background {
+  >> { quality: questioning, priority: 0.3, confidence: 0.6, half_life: 50 }
+     "Consolidation: scanning short-term memories for merge/prune"
+
+  connect depth deep {
+    signal questioning 0.5 inward data "evaluating memory relationships"
+    signal recognizing 0.4 inward data "finding related memories to merge"
+  }
+
+  ShortTermStore ~ Consolidator until synchronized
+
+  => when sync_level > 0.3 depth deep {
+    mem1_val <- ShortTermStore.mem1_content
+    mem2_val <- ShortTermStore.mem2_content
+    mem3_val <- ShortTermStore.mem3_content
+    mem1_conf <- ShortTermStore.mem1_confidence
+    mem3_conf <- ShortTermStore.mem3_confidence
+    merge_candidates <- "mem1 + mem2 (both about San Francisco)"
+    prune_candidates <- "mem3 (confidence 0.25 < threshold 0.3)"
+    consolidated_memory <- "user is planning a trip to San Francisco next month and is interested in local weather"
+    consolidated_confidence <- "0.85"
+    pruned_count <- "1"
+    merged_count <- "1"
+    action_taken <- "merged weather+travel into single SF-trip memory, pruned vague food reference"
+  }
+
+  * from apply {
+    stage: "consolidation"
+    merged: 1
+    pruned: 1
+    remaining: 1
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- TRANSFER: Move consolidated memory to long-term store
+--
+-- The merged memory gets a much longer half_life.
+-- ═══════════════════════════════════════════════════════════
+
+link Consolidator <-> LongTermStore priority background {
+  >> { quality: recognizing, priority: 0.4, confidence: 0.8, half_life: 2000 }
+     "Transferring consolidated memory to long-term store"
+
+  connect depth full {
+    signal recognizing 0.7 between data Consolidator.consolidated_memory
+  }
+
+  Consolidator ~ LongTermStore until synchronized
+
+  => when sync_level > 0.3 depth deep {
+    lt_memory <- Consolidator.consolidated_memory
+    lt_confidence <- Consolidator.consolidated_confidence
+    lt_half_life <- "2000"
+    lt_source <- "consolidated from short-term memories 1+2"
+    lt_topic <- "user_trip_san_francisco"
+    transfer_status <- "complete"
+  }
+
+  * from apply {
+    stage: "transfer"
+    destination: "long_term"
+    half_life: 2000
+    source_memories: 2
+  }
+}

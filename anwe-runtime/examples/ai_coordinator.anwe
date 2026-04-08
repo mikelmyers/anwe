@@ -1,0 +1,99 @@
+-- ═══════════════════════════════════════════════════════════
+-- ai_coordinator.anwe — ANWE v0.5 Integration Demo
+-- A complete AI coordination pipeline demonstrating:
+--   agents, supervision, bridge, scheduling, closures,
+--   persistence, records, pattern matching, higher-order fns
+-- ═══════════════════════════════════════════════════════════
+
+-- ─── AGENTS ─────────────────────────────────────────────
+-- The three-stage pipeline: Perceive → Reason → Respond
+
+agent Perceiver data { observation: "waiting"  confidence: 0.0 }
+agent Reasoner data { model: "reasoning-v1"  conclusion: "idle"  depth: 0 }
+agent Responder data { style: "helpful"  output: "none"  count: 0 }
+
+-- ─── RECORDS ────────────────────────────────────────────
+-- Structured data types for the pipeline
+
+record Observation { source, content, confidence }
+record Decision { action, reasoning, priority }
+
+-- ─── FUNCTIONS ──────────────────────────────────────────
+-- Utility functions for the coordinator
+
+fn classify_confidence(score) = match score {
+    0.9 => "high"
+    0.5 => "medium"
+}
+
+fn double(x) = x * 2
+
+-- ─── SUPERVISION ────────────────────────────────────────
+-- Erlang-style supervision tree: agents crash, we restart them
+
+supervise one_for_one max_restarts 3 within 5000 {
+    permanent Perceiver
+    permanent Reasoner
+    transient Responder
+}
+
+-- ─── HIGHER-ORDER PROCESSING ────────────────────────────
+-- Closures and functional transformations
+
+let scores = [0.7, 0.85, 0.92, 0.6, 0.95]
+let high_confidence = filter(scores, |s| s > 0.8)
+let total = reduce(scores, |acc, x| acc + x, 0)
+let count = len(scores)
+
+-- ─── LINK 1: Perception → Reasoning ────────────────────
+-- The perceiver observes, the reasoner processes
+
+link Perceiver <-> Reasoner {
+    >> "perception incoming"
+    connect depth full {
+        signal attending 0.9 outward
+    }
+    Perceiver ~ Reasoner until synchronized
+    => when sync_level > 0.5 depth full {
+        observation <- "processed"
+    }
+    * from apply { source: "perception" }
+}
+
+-- ─── LINK 2: Reasoning → Response ──────────────────────
+-- The reasoner's conclusions become the responder's output
+
+link Reasoner <-> Responder {
+    >> "reasoning complete"
+    connect depth deep {
+        signal recognizing 0.8 between
+    }
+    Reasoner ~ Responder until synchronized
+    => when sync_level > 0.5 depth deep {
+        conclusion <- "delivered"
+    }
+    * from apply { source: "reasoning" }
+}
+
+-- ─── LINK 3: Self-Monitoring with Error Recovery ───────
+-- The reasoner monitors itself with attempt/recover
+
+link Reasoner <-> Reasoner {
+    >> "self-check"
+    attempt {
+        Reasoner ~ Reasoner until synchronized
+        => when sync_level > 0.3 {
+            depth <- 1
+        }
+    } recover {
+        >> "self-recovery"
+    }
+    * from apply { source: "self-monitor" }
+}
+
+-- ─── LINK 4: Periodic Heartbeat ────────────────────────
+-- Time-scheduled execution: run 3 times
+
+link Perceiver <-> Responder every 3 ticks {
+    >> "heartbeat"
+}

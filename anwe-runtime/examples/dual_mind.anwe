@@ -1,0 +1,94 @@
+-- ─────────────────────────────────────────────────────────────
+-- dual_mind.anwe
+--
+-- Two minds and the link between them.
+-- Each mind attends from its own perspective.
+-- The link connects them bidirectionally.
+--
+-- This is not message passing between processes.
+-- This is two cognitive spaces discovering what emerges
+-- in the genuine encounter between them.
+-- ─────────────────────────────────────────────────────────────
+
+-- The first mind: pattern recognition
+mind Perceiver attention 0.6 {
+
+  attend "incoming patterns" priority 0.9 {
+    >> { quality: attending, priority: 0.85 }
+       "raw sensory input arriving"
+
+    think {
+      pattern_type  <- "recurring structure"
+      confidence    <- 0.78
+      novelty       <- 0.45
+    }
+
+    express { quality: recognizing, priority: 0.8 }
+      "pattern recognized — structure detected"
+  }
+
+  attend "pattern history" priority 0.4 {
+    think {
+      similar_count <- 12
+      last_seen     <- "3 cycles ago"
+    }
+
+    express "this pattern has been seen before — familiarity deepens"
+  }
+}
+
+-- The second mind: meaning-making
+mind Interpreter attention 0.6 {
+
+  attend "received patterns" priority 0.85 {
+    >> { quality: questioning, priority: 0.8 }
+       "what does this pattern mean?"
+
+    think {
+      interpretation <- "the pattern suggests growth"
+      depth          <- 2
+      uncertainty    <- 0.3
+    }
+
+    express { quality: attending, priority: 0.7 }
+      "meaning extracted — the pattern speaks of becoming"
+  }
+
+  attend "synthesize" priority 0.5 {
+    think {
+      synthesis <- "perception and meaning converge"
+    }
+
+    express { quality: completing, priority: 0.6 }
+      "synthesis complete — understanding deepened"
+  }
+}
+
+-- The link: where they meet
+-- Neither mind is primary. Both change each other.
+link Perceiver <-> Interpreter priority high {
+  >> { quality: attending, priority: 0.9 }
+     "two minds entering shared field"
+
+  connect depth full {
+    signal attending   0.8 between
+    signal recognizing 0.7 between
+    signal questioning 0.6 between
+  }
+
+  Perceiver ~ Interpreter until synchronized
+
+  converge Perceiver <<>> Interpreter {
+    >> { quality: attending, priority: 0.95 }
+       "what emerges between perception and interpretation"
+
+    => when sync_level > 0.7 depth genuine {
+      emergence <- "understanding that neither mind had alone"
+    }
+  }
+
+  * from apply {
+    encounter: "genuine"
+    both_changed: "yes"
+  }
+}

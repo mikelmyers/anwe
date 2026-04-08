@@ -1,0 +1,275 @@
+-- ─────────────────────────────────────────────────────────
+-- GOSSIP PROPAGATION IN ANWE
+--
+-- Knowledge spreads through a network over time.
+-- No broadcast — each node shares with neighbors,
+-- who share with their neighbors, until convergence.
+--
+-- Like rumors in a village. Like pheromone trails.
+-- Like how the nervous system propagates signals.
+--
+-- ANWE's lineage concept maps perfectly:
+-- knowledge propagates with temporal decay and confidence.
+--
+-- BUILDSHEET items covered:
+--   [x] Gossip propagation (Distributed AI)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS — 6 nodes in a mesh network
+-- ═══════════════════════════════════════════════════════════
+
+-- Node topology: partial mesh
+--   A --- B --- C
+--   |     |     |
+--   D --- E --- F
+
+agent Node_A attention 0.6 bridge("tcp", "node-a:7000") data {
+  neighbors: ["Node_B", "Node_D"]
+  knowledge: []
+  gossip_round: 0
+  propagation_delay_ticks: 5
+}
+
+agent Node_B attention 0.6 bridge("tcp", "node-b:7000") data {
+  neighbors: ["Node_A", "Node_C", "Node_E"]
+  knowledge: []
+  gossip_round: 0
+  propagation_delay_ticks: 5
+}
+
+agent Node_C attention 0.6 bridge("tcp", "node-c:7000") data {
+  neighbors: ["Node_B", "Node_F"]
+  knowledge: []
+  gossip_round: 0
+  propagation_delay_ticks: 5
+}
+
+agent Node_D attention 0.6 bridge("tcp", "node-d:7000") data {
+  neighbors: ["Node_A", "Node_E"]
+  knowledge: []
+  gossip_round: 0
+  propagation_delay_ticks: 5
+}
+
+agent Node_E attention 0.6 bridge("tcp", "node-e:7000") data {
+  neighbors: ["Node_B", "Node_D", "Node_F"]
+  knowledge: []
+  gossip_round: 0
+  propagation_delay_ticks: 5
+}
+
+agent Node_F attention 0.6 bridge("tcp", "node-f:7000") data {
+  neighbors: ["Node_C", "Node_E"]
+  knowledge: []
+  gossip_round: 0
+  propagation_delay_ticks: 5
+}
+
+-- The knowledge being propagated
+agent GossipPayload data {
+  origin: "Node_A"
+  content: "model_v2.1_available"
+  version: 1
+  confidence: 1.0
+  hops: 0
+  max_hops: 4
+}
+
+-- Propagation tracker
+agent PropagationTracker data {
+  nodes_reached: 0
+  total_nodes: 6
+  rounds_to_full_coverage: 0
+  propagation_path: []
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 10 within 60000 {
+  Node_A
+  Node_B
+  Node_C
+  Node_D
+  Node_E
+  Node_F
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LINKS
+-- ═══════════════════════════════════════════════════════════
+
+-- Round 0: Origin — Node A receives the knowledge
+link GossipPayload <-> Node_A priority high {
+  >> { quality: recognizing, priority: 0.9, confidence: 1.0, half_life: 200 }
+     "Origin node receives knowledge to propagate"
+
+  connect depth deep {
+    signal recognizing 0.9 between data "knowledge injection at origin"
+  }
+
+  GossipPayload ~ Node_A until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    knowledge_received <- "model_v2.1_available"
+    hops <- 0
+    confidence <- 1.0
+    will_gossip_to <- ["Node_B", "Node_D"]
+  }
+
+  * from apply {
+    stage: "origin"
+    node: "A"
+    hops: 0
+  }
+}
+
+-- Round 1: A gossips to B and D
+link Node_A <-> Node_B priority normal every 5 ticks {
+  >> { quality: recognizing, priority: 0.7, confidence: 0.95, half_life: 150 }
+     "Gossip: A → B (hop 1)"
+
+  connect depth partial {
+    signal recognizing 0.7 between data "gossip transmission"
+  }
+
+  Node_A ~ Node_B until synchronized
+
+  => when sync_level > 0.5 depth partial {
+    knowledge <- "model_v2.1_available"
+    hops <- 1
+    confidence <- 0.95
+    received_from <- "Node_A"
+    will_forward_to <- ["Node_C", "Node_E"]
+  }
+
+  * from apply { stage: "gossip" from: "A" to: "B" hops: 1 }
+}
+
+link Node_A <-> Node_D priority normal every 5 ticks {
+  >> { quality: recognizing, priority: 0.7, confidence: 0.95, half_life: 150 }
+     "Gossip: A → D (hop 1)"
+
+  connect depth partial {
+    signal recognizing 0.7 between data "gossip transmission"
+  }
+
+  Node_A ~ Node_D until synchronized
+
+  => when sync_level > 0.5 depth partial {
+    knowledge <- "model_v2.1_available"
+    hops <- 1
+    confidence <- 0.95
+    received_from <- "Node_A"
+    will_forward_to <- ["Node_E"]
+  }
+
+  * from apply { stage: "gossip" from: "A" to: "D" hops: 1 }
+}
+
+-- Round 2: B gossips to C and E, D gossips to E
+link Node_B <-> Node_C priority normal every 5 ticks {
+  >> { quality: recognizing, priority: 0.65, confidence: 0.90, half_life: 150 }
+     "Gossip: B → C (hop 2)"
+
+  connect depth partial {
+    signal recognizing 0.65 between data "gossip relay"
+  }
+
+  Node_B ~ Node_C until synchronized
+
+  => when sync_level > 0.5 depth partial {
+    knowledge <- "model_v2.1_available"
+    hops <- 2
+    confidence <- 0.90
+    received_from <- "Node_B"
+    will_forward_to <- ["Node_F"]
+  }
+
+  * from apply { stage: "gossip" from: "B" to: "C" hops: 2 }
+}
+
+link Node_B <-> Node_E priority normal every 5 ticks {
+  >> { quality: recognizing, priority: 0.65, confidence: 0.90, half_life: 150 }
+     "Gossip: B → E (hop 2)"
+
+  connect depth partial {
+    signal recognizing 0.65 between data "gossip relay"
+  }
+
+  Node_B ~ Node_E until synchronized
+
+  -- E may already have received from D — dedup
+  if Node_E.gossip_round < 1 {
+    => when sync_level > 0.5 depth partial {
+      knowledge <- "model_v2.1_available"
+      hops <- 2
+      confidence <- 0.90
+      received_from <- "Node_B"
+      duplicate <- "false"
+    }
+  } else {
+    => when sync_level > 0.5 depth partial {
+      duplicate <- "true"
+      already_has <- "model_v2.1_available"
+      confidence_update <- "max(existing, incoming)"
+    }
+  }
+
+  * from apply { stage: "gossip" from: "B" to: "E" hops: 2 }
+}
+
+-- Round 3: C gossips to F — last node reached
+link Node_C <-> Node_F priority normal every 5 ticks {
+  >> { quality: recognizing, priority: 0.6, confidence: 0.85, half_life: 150 }
+     "Gossip: C → F (hop 3)"
+
+  connect depth partial {
+    signal recognizing 0.6 between data "gossip relay"
+  }
+
+  Node_C ~ Node_F until synchronized
+
+  => when sync_level > 0.5 depth partial {
+    knowledge <- "model_v2.1_available"
+    hops <- 3
+    confidence <- 0.85
+    received_from <- "Node_C"
+    all_neighbors_have_it <- "true"
+  }
+
+  * from apply { stage: "gossip" from: "C" to: "F" hops: 3 }
+}
+
+-- Track propagation state
+link PropagationTracker <-> PropagationTracker priority low {
+  >> { quality: completing, priority: 0.5, confidence: 0.95, half_life: 500 }
+     "Recording gossip propagation statistics"
+
+  connect depth partial {
+    signal completing 0.5 inward data "propagation tracking"
+  }
+
+  => when sync_level > 0.4 depth partial {
+    nodes_reached <- 6
+    total_nodes <- 6
+    coverage <- 1.0
+    rounds_to_full_coverage <- 3
+    propagation_path <- ["A→B,D", "B→C,E  D→E", "C→F"]
+    avg_confidence_at_edge <- 0.85
+    max_hops <- 3
+    duplicates_detected <- 1
+    total_messages <- 6
+  }
+
+  * from apply {
+    stage: "propagation_complete"
+    coverage: "100%"
+    rounds: 3
+  }
+}

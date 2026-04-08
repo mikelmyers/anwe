@@ -1,0 +1,84 @@
+-- ─────────────────────────────────────────────────────────────
+-- mind_pattern.anwe
+--
+-- A mind that uses reusable patterns to structure its attention.
+-- Patterns are attention shapes — not functions, not templates.
+-- They describe how attention flows through a cognitive process.
+--
+-- The mind invokes patterns with ~> (pattern flow).
+-- Each pattern carries its own quality of attention.
+-- ─────────────────────────────────────────────────────────────
+
+-- Pattern: acknowledge and assess
+-- The initial response to any new stimulus
+pattern acknowledge(partner) {
+  >> { quality: attending, priority: 0.8 }
+     "stimulus acknowledged"
+
+  connect depth surface {
+    signal attending 0.7 between
+  }
+
+  partner ~ partner until synchronized
+}
+
+-- Pattern: deep analysis
+-- When something needs sustained attention
+pattern analyze_deeply(subject) {
+  >> { quality: questioning, priority: 0.85 }
+     "entering deep analysis"
+
+  connect depth deep {
+    signal questioning 0.8 inward
+    signal attending   0.9 between
+  }
+
+  subject ~ subject until resonating
+
+  => when sync_level > 0.8 depth genuine {
+    analysis <- "deep structure revealed"
+  }
+}
+
+mind Analyst attention 0.7 {
+
+  -- High priority: initial assessment uses acknowledge pattern
+  attend "initial assessment" priority 0.9 {
+    ~> acknowledge(Analyst)
+
+    think {
+      first_impression <- "something significant arrived"
+      requires_depth   <- "yes"
+    }
+
+    express { quality: recognizing, priority: 0.7 }
+      "initial assessment complete — deeper analysis warranted"
+  }
+
+  -- Medium priority: deep analysis uses the analyze_deeply pattern
+  attend "deep analysis" priority 0.65 {
+    ~> analyze_deeply(Analyst)
+
+    think {
+      conclusion  <- "the deep structure confirms the pattern"
+      confidence  <- 0.88
+    }
+
+    * from apply {
+      analyzed: "genuine depth reached"
+    }
+
+    express { quality: completing, priority: 0.8 }
+      "analysis complete — understanding integrated"
+  }
+
+  -- Low priority: record the outcome
+  attend "record" priority 0.3 {
+    think {
+      summary <- "assessment -> analysis -> integration"
+    }
+
+    express { quality: resting, priority: 0.2 }
+      "cognitive cycle recorded"
+  }
+}

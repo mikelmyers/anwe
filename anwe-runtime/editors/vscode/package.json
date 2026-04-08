@@ -1,0 +1,41 @@
+{
+  "name": "anwe",
+  "displayName": "ANWE — Autonomous Agent Neural Weave",
+  "description": "Syntax highlighting for the ANWE language (.anwe files)",
+  "version": "0.1.0",
+  "publisher": "primordia",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mikelmyers/Primordia"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "anwe",
+        "aliases": [
+          "ANWE",
+          "anwe",
+          "Autonomous Agent Neural Weave"
+        ],
+        "extensions": [
+          ".anwe"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "anwe",
+        "scopeName": "source.anwe",
+        "path": "./syntaxes/anwe.tmLanguage.json"
+      }
+    ]
+  }
+}

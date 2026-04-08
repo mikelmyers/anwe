@@ -1,0 +1,205 @@
+-- ─────────────────────────────────────────────────────────
+-- SELF-CONSISTENCY IN ANWE
+--
+-- 3 model instances (ModelA, ModelB, ModelC) answer the
+-- same question independently. Voter collects all answers
+-- via FieldAccess and converge picks the consensus.
+--
+-- one_for_all supervision: if any model crashes,
+-- restart all to maintain consistency.
+--
+-- What this proves about ANWE:
+--   - Parallel independent reasoning via separate links
+--   - FieldAccess collects distributed answers
+--   - Converge synthesizes consensus
+--   - one_for_all ensures consistency across instances
+--
+-- BUILDSHEET items covered:
+--   [x] Self-consistency (Reasoning & Planning)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+-- The question to answer
+agent Question data {
+  text: "What is the integral of x^2 from 0 to 3?"
+  correct_answer: "9"
+  method: "self_consistency_voting"
+}
+
+-- Three independent model instances
+agent ModelA attention 0.8 external("callback", "model_a") data {
+  instance: "A"
+  temperature: "0.7"
+  seed: "42"
+}
+
+agent ModelB attention 0.8 external("callback", "model_b") data {
+  instance: "B"
+  temperature: "0.8"
+  seed: "123"
+}
+
+agent ModelC attention 0.8 external("callback", "model_c") data {
+  instance: "C"
+  temperature: "0.9"
+  seed: "456"
+}
+
+-- Voter that collects and selects consensus
+agent Voter attention 0.6 data {
+  method: "majority_vote"
+  min_agreement: "2"
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- one_for_all: if any model crashes, restart all
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_all max_restarts 3 within 20000 {
+  permanent ModelA
+  permanent ModelB
+  permanent ModelC
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- INSTANCE A: Question → ModelA
+-- ═══════════════════════════════════════════════════════════
+
+link Question <-> ModelA priority high {
+  >> { quality: attending, priority: 0.9, confidence: 0.85, half_life: 300 }
+     "Instance A: computing integral of x^2 from 0 to 3"
+
+  connect depth deep {
+    signal attending   0.9  between data "ModelA reasoning about integral"
+    signal recognizing 0.85 inward  data "applying power rule: x^3/3"
+  }
+
+  Question ~ ModelA until resonating
+
+  <= when confidence <= 0.3 data "ModelA failed to produce answer"
+
+  => when sync_level > 0.7 depth deep {
+    answer_a <- "9"
+    reasoning_a <- "integral of x^2 = x^3/3, evaluated from 0 to 3 = 27/3 - 0 = 9"
+    confidence_a <- "0.95"
+  }
+
+  * from apply {
+    stage: "instance"
+    model: "A"
+    answer: "9"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- INSTANCE B: Question → ModelB
+-- ═══════════════════════════════════════════════════════════
+
+link Question <-> ModelB priority high {
+  >> { quality: attending, priority: 0.9, confidence: 0.82, half_life: 300 }
+     "Instance B: computing integral of x^2 from 0 to 3"
+
+  connect depth deep {
+    signal attending   0.88 between data "ModelB reasoning about integral"
+    signal recognizing 0.8  inward  data "using antiderivative method"
+  }
+
+  Question ~ ModelB until resonating
+
+  <= when confidence <= 0.3 data "ModelB failed to produce answer"
+
+  => when sync_level > 0.7 depth deep {
+    answer_b <- "9"
+    reasoning_b <- "F(x) = x^3/3. F(3) - F(0) = 9 - 0 = 9"
+    confidence_b <- "0.92"
+  }
+
+  * from apply {
+    stage: "instance"
+    model: "B"
+    answer: "9"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- INSTANCE C: Question → ModelC
+-- Higher temperature → slightly different reasoning path.
+-- ═══════════════════════════════════════════════════════════
+
+link Question <-> ModelC priority high {
+  >> { quality: attending, priority: 0.9, confidence: 0.78, half_life: 300 }
+     "Instance C: computing integral of x^2 from 0 to 3"
+
+  connect depth deep {
+    signal attending   0.85 between data "ModelC reasoning about integral"
+    signal recognizing 0.75 inward  data "numerical approximation approach"
+  }
+
+  Question ~ ModelC until resonating
+
+  <= when confidence <= 0.3 data "ModelC failed to produce answer"
+
+  => when sync_level > 0.7 depth deep {
+    answer_c <- "9"
+    reasoning_c <- "Riemann sum approximation converges to 9.0. Confirmed via power rule."
+    confidence_c <- "0.88"
+  }
+
+  * from apply {
+    stage: "instance"
+    model: "C"
+    answer: "9"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- VOTE: Collect answers and converge on consensus
+-- ═══════════════════════════════════════════════════════════
+
+link ModelA <-> Voter priority normal {
+  >> { quality: recognizing, priority: 0.7, confidence: 0.85, half_life: 200 }
+     "Collecting answers for majority vote"
+
+  connect depth full {
+    signal recognizing 0.7 between data "gathering all model answers"
+  }
+
+  ModelA ~ Voter until synchronized
+
+  converge ModelA <<>> Voter {
+    >> { quality: recognizing, priority: 0.6 }
+       ModelB.answer_b
+    >> { quality: recognizing, priority: 0.6 }
+       ModelC.answer_c
+  }
+
+  => when sync_level > 0.3 depth deep {
+    vote_a <- ModelA.answer_a
+    vote_b <- ModelB.answer_b
+    vote_c <- ModelC.answer_c
+    conf_a <- ModelA.confidence_a
+    conf_b <- ModelB.confidence_b
+    conf_c <- ModelC.confidence_c
+    consensus_answer <- "9"
+    agreement <- "3/3 unanimous"
+    consensus_confidence <- "0.95"
+    method <- "majority vote with confidence weighting"
+  }
+
+  * from apply {
+    stage: "vote"
+    consensus: "9"
+    agreement: "3/3"
+    confidence: "0.95"
+  }
+}

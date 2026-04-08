@@ -1,0 +1,257 @@
+-- ─────────────────────────────────────────────────────────
+-- FEDERATED LEARNING IN ANWE
+--
+-- Multiple nodes train locally on private data,
+-- sync gradients periodically to a central aggregator.
+-- Data never leaves the node — only gradients travel.
+--
+-- ANWE's sync + bridge makes this native:
+--   - Each node is an agent with its own attention
+--   - Network bridge connects nodes across machines
+--   - Sync primitive drives gradient exchange rounds
+--   - Lineage tracks learning progress across rounds
+--
+-- BUILDSHEET items covered:
+--   [x] Federated learning (Distributed AI)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+-- Central aggregation server
+agent Aggregator attention 0.95 data {
+  global_model_version: 0
+  total_rounds: 0
+  target_rounds: 10
+  min_participants: 3
+  aggregation_strategy: "federated_averaging"
+}
+
+-- Hospital A — private patient data (never shared)
+agent NodeHospitalA attention 0.8 bridge("grpc", "hospital-a.internal:9090") data {
+  location: "hospital_a"
+  local_samples: 5000
+  privacy_level: "hipaa"
+  local_model_version: 0
+  local_accuracy: 0.72
+}
+
+-- Hospital B — private patient data
+agent NodeHospitalB attention 0.8 bridge("grpc", "hospital-b.internal:9090") data {
+  location: "hospital_b"
+  local_samples: 8000
+  privacy_level: "hipaa"
+  local_model_version: 0
+  local_accuracy: 0.75
+}
+
+-- Clinic C — smaller dataset
+agent NodeClinicC attention 0.7 bridge("grpc", "clinic-c.internal:9090") data {
+  location: "clinic_c"
+  local_samples: 2000
+  privacy_level: "hipaa"
+  local_model_version: 0
+  local_accuracy: 0.68
+}
+
+-- Research Lab D
+agent NodeLabD attention 0.7 bridge("grpc", "lab-d.internal:9090") data {
+  location: "lab_d"
+  local_samples: 12000
+  privacy_level: "research"
+  local_model_version: 0
+  local_accuracy: 0.78
+}
+
+-- Privacy controller
+agent PrivacyGuard attention 0.9 data {
+  dp_epsilon: 1.0
+  dp_delta: 0.00001
+  noise_mechanism: "gaussian"
+  clipping_norm: 1.0
+}
+
+-- Round tracker
+agent FedRound data {
+  round: 0
+  participants: []
+  gradients_received: 0
+  status: "idle"
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise rest_for_one max_restarts 10 within 120000 {
+  Aggregator
+  PrivacyGuard
+  FedRound
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LINKS
+-- ═══════════════════════════════════════════════════════════
+
+-- Round 1: Local training on each node
+link NodeHospitalA <-> NodeHospitalA priority high {
+  >> { quality: applying, priority: 0.9, confidence: 0.85, half_life: 300 }
+     "Hospital A: local training on private data"
+
+  connect depth deep {
+    signal applying 0.9 inward data "training on 5000 local samples"
+  }
+
+  => when sync_level > 0.5 depth deep {
+    local_gradients <- "grad_hosp_a_r1"
+    local_loss <- 0.45
+    local_accuracy <- 0.79
+    epochs_completed <- 5
+    data_never_shared <- "true"
+  }
+
+  * from apply {
+    stage: "local_training"
+    node: "hospital_a"
+  }
+}
+
+link NodeHospitalB <-> NodeHospitalB priority high {
+  >> { quality: applying, priority: 0.9, confidence: 0.85, half_life: 300 }
+     "Hospital B: local training on private data"
+
+  connect depth deep {
+    signal applying 0.9 inward data "training on 8000 local samples"
+  }
+
+  => when sync_level > 0.5 depth deep {
+    local_gradients <- "grad_hosp_b_r1"
+    local_loss <- 0.38
+    local_accuracy <- 0.82
+    epochs_completed <- 5
+    data_never_shared <- "true"
+  }
+
+  * from apply {
+    stage: "local_training"
+    node: "hospital_b"
+  }
+}
+
+link NodeClinicC <-> NodeClinicC priority high {
+  >> { quality: applying, priority: 0.9, confidence: 0.85, half_life: 300 }
+     "Clinic C: local training on private data"
+
+  connect depth deep {
+    signal applying 0.9 inward data "training on 2000 local samples"
+  }
+
+  => when sync_level > 0.5 depth deep {
+    local_gradients <- "grad_clinic_c_r1"
+    local_loss <- 0.52
+    local_accuracy <- 0.74
+    epochs_completed <- 5
+    data_never_shared <- "true"
+  }
+
+  * from apply {
+    stage: "local_training"
+    node: "clinic_c"
+  }
+}
+
+link NodeLabD <-> NodeLabD priority high {
+  >> { quality: applying, priority: 0.9, confidence: 0.85, half_life: 300 }
+     "Lab D: local training on research data"
+
+  connect depth deep {
+    signal applying 0.9 inward data "training on 12000 local samples"
+  }
+
+  => when sync_level > 0.5 depth deep {
+    local_gradients <- "grad_lab_d_r1"
+    local_loss <- 0.32
+    local_accuracy <- 0.84
+    epochs_completed <- 5
+    data_never_shared <- "true"
+  }
+
+  * from apply {
+    stage: "local_training"
+    node: "lab_d"
+  }
+}
+
+-- Apply differential privacy to gradients before sharing
+link PrivacyGuard <-> FedRound priority critical {
+  >> { quality: attending, priority: 0.95, confidence: 0.9, half_life: 100 }
+     "Applying differential privacy noise to gradients"
+
+  connect depth deep {
+    signal attending   0.95 between data "privacy protection"
+    signal recognizing 0.9  inward  data "noise injection"
+  }
+
+  PrivacyGuard ~ FedRound until synchronized
+
+  each node in [NodeHospitalA, NodeHospitalB, NodeClinicC, NodeLabD] {
+    => when sync_level > 0.7 depth deep {
+      gradient_clipped <- "true"
+      noise_added <- "gaussian"
+      dp_epsilon_spent <- 0.1
+      remaining_budget <- 0.9
+    }
+  }
+
+  * from apply {
+    stage: "privacy"
+    mechanism: "gaussian_dp"
+  }
+}
+
+-- Federated aggregation: sync all nodes + average gradients
+link FedRound <-> Aggregator priority critical {
+  >> { quality: applying, priority: 0.98, confidence: 0.9, half_life: 100 }
+     "Federated averaging — aggregate gradient updates"
+
+  connect depth deep {
+    signal applying    0.98 between data "gradient aggregation"
+    signal recognizing 0.95 inward  data "weighted averaging"
+  }
+
+  FedRound ~ Aggregator until synchronized
+
+  sync_all [NodeHospitalA, NodeHospitalB, NodeClinicC, NodeLabD] until synchronized {
+    quorum: 3
+    timeout_ticks: 5000
+    strategy: "federated_averaging"
+  }
+
+  => when sync_level > 0.8 depth deep {
+    round <- 1
+    participants <- 4
+    aggregation <- "sample_weighted_average"
+    weight_hosp_a <- 0.185
+    weight_hosp_b <- 0.296
+    weight_clinic_c <- 0.074
+    weight_lab_d <- 0.444
+    global_model_version <- 1
+    estimated_global_accuracy <- 0.81
+    privacy_budget_remaining <- 0.9
+  }
+
+  broadcast [NodeHospitalA, NodeHospitalB, NodeClinicC, NodeLabD] {
+    signal applying 0.9 between data "updated global model v1"
+  }
+
+  * from apply {
+    stage: "federated_round"
+    round: 1
+    participants: 4
+    global_accuracy: 0.81
+  }
+}

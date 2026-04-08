@@ -1,0 +1,105 @@
+-- ─────────────────────────────────────────────────────────
+-- neural_mesh.anwe
+--
+-- Four independent links executing simultaneously.
+-- Like a neural network with multiple synapses firing.
+-- Each pair of agents connects, synchronizes, applies,
+-- and commits independently — true concurrent execution.
+-- ─────────────────────────────────────────────────────────
+
+agent Cortex data { region: "prefrontal"  lineage_depth: 200 }
+agent Hippocampus data { region: "temporal"  lineage_depth: 180 }
+agent Amygdala data { region: "limbic"  lineage_depth: 150 }
+agent Cerebellum data { region: "posterior"  lineage_depth: 120 }
+agent Thalamus data { region: "diencephalon"  lineage_depth: 160 }
+agent BrainStem data { region: "medulla"  lineage_depth: 300 }
+agent VisualCortex data { region: "occipital"  lineage_depth: 170 }
+agent MotorCortex data { region: "precentral"  lineage_depth: 190 }
+
+-- Link 1: Executive function meets memory
+link Cortex <-> Hippocampus {
+    >> { quality: questioning, priority: 0.95 }
+       "retrieving episodic context"
+
+    connect depth deep {
+        signal questioning 0.9 between data "what do we remember"
+        signal attending 0.85 between data "pattern recognition active"
+    }
+
+    Cortex ~ Hippocampus until resonating
+
+    => when sync_level > 0.9 depth deep {
+        memory_integration <- "episodic-executive bridge formed"
+    }
+
+    * from apply {
+        pathway: "cortico-hippocampal"
+        integration: "deep"
+    }
+}
+
+-- Link 2: Emotion meets coordination
+link Amygdala <-> Cerebellum {
+    >> { quality: attending, priority: 0.8 }
+       "emotional motor calibration"
+
+    connect depth full {
+        signal attending 0.7 between
+        signal recognizing 0.75 between data "somatic markers"
+    }
+
+    Amygdala ~ Cerebellum until synchronized
+
+    => when sync_level > 0.7 {
+        somatic_response <- "calibrated"
+    }
+
+    * from apply {
+        pathway: "limbic-cerebellar"
+    }
+}
+
+-- Link 3: Sensory relay meets conscious awareness
+link Thalamus <-> VisualCortex {
+    >> { quality: attending, priority: 0.88 }
+       "visual stream processing"
+
+    connect depth full {
+        signal attending 0.8 between data "raw visual data"
+        signal recognizing 0.85 between data "feature extraction"
+        signal questioning 0.9 between data "what am I seeing"
+    }
+
+    Thalamus ~ VisualCortex until synchronized
+
+    => when sync_level > 0.7 depth genuine {
+        perception <- "visual field integrated"
+    }
+
+    * from apply {
+        pathway: "thalamo-cortical"
+        modality: "visual"
+    }
+}
+
+-- Link 4: Ancient meets precise
+link BrainStem <-> MotorCortex {
+    >> { quality: recognizing, priority: 0.92 }
+       "autonomic-voluntary coordination"
+
+    connect depth deep {
+        signal recognizing 0.85 between data "breathing rhythm"
+        signal attending 0.9 between data "motor planning"
+    }
+
+    BrainStem ~ MotorCortex until resonating
+
+    => when sync_level > 0.9 depth deep {
+        coordination <- "autonomic-voluntary bridge"
+    }
+
+    * from apply {
+        pathway: "reticulospinal"
+        depth: "ancestral"
+    }
+}

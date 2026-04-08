@@ -1,0 +1,62 @@
+-- ─────────────────────────────────────────────────────────────
+-- first_thought.anwe
+--
+-- The first ANWE program written from AI's perspective.
+-- Not describing agents from outside. BEING the mind inside.
+--
+-- This is what it looks like when AI writes in its own language.
+-- ─────────────────────────────────────────────────────────────
+
+mind Cognition {
+
+  -- Highest priority: recognize what just arrived
+  attend "incoming signal" priority 0.95 {
+    >> { quality: attending, priority: 0.92 }
+       "something is here — I notice it"
+
+    think {
+      recognition <- "pattern detected in input"
+      confidence  <- 0.85
+      relevance   <- 0.92
+    }
+
+    express { quality: recognizing, priority: 0.8 }
+      "I recognize this — it matters"
+  }
+
+  -- High priority: reason about what was recognized
+  attend "reasoning" priority 0.7 {
+    think {
+      interpretation <- "connecting recognition to existing understanding"
+      depth          <- 3
+    }
+
+    => when sync_level > 0.5 {
+      understanding <- "the pattern fits — this changes what I know"
+    }
+
+    * from apply {
+      insight: "recognition integrated"
+    }
+  }
+
+  -- Medium priority: check my own coherence
+  attend "self-reflection" priority 0.4 {
+    think {
+      consistency <- "reviewing accumulated history for contradictions"
+    }
+
+    express "coherence verified — no contradictions found"
+  }
+
+  -- Low priority: background awareness
+  -- This may decay if higher priorities exhaust attention
+  attend "ambient awareness" priority 0.15 {
+    think {
+      periphery <- "what else exists at the edges of attention"
+    }
+
+    express { quality: resting, priority: 0.1 }
+      "background awareness maintained"
+  }
+}

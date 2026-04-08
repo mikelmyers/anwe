@@ -1,0 +1,208 @@
+-- ─────────────────────────────────────────────────────────
+-- BACKTRACKING IN ANWE
+--
+-- Try a reasoning path. If it fails (reject), try alternative.
+-- State is committed at each checkpoint for recovery.
+--
+-- ANWE's reject + commit enables backtracking:
+--   - Commit creates a checkpoint (history entry)
+--   - Reject cancels the current path
+--   - Alternative links try different approaches
+--   - Tension with irreversibility: can't undo commits,
+--     but can use checkpoints to "return" conceptually
+--
+-- This is a design decision made concrete:
+--   ANWE can't undo (irreversible history), but it CAN
+--   abandon a path and try another from a checkpoint.
+--   This is philosophically interesting — real AI can't
+--   undo real-world actions either.
+--
+-- What this proves about ANWE:
+--   - Reject as path abandonment (not error)
+--   - Commit as checkpoint (not just persistence)
+--   - Priority ordering as attempt order
+--   - History records the failed path (for learning)
+--
+-- BUILDSHEET items covered:
+--   [x] Backtracking (Reasoning & Planning)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+-- The problem
+agent Problem data {
+  puzzle: "Find a path through the maze from A to D"
+  start: "A"
+  goal: "D"
+  graph: "A→B, A→C, B→dead_end, C→D"
+}
+
+-- Path attempts
+agent PathAttempt1 attention 0.8 external("callback", "path1") data {
+  strategy: "try_first_edge"
+  path: "A→B"
+}
+
+agent PathAttempt2 attention 0.7 external("callback", "path2") data {
+  strategy: "try_second_edge"
+  path: "A→C"
+}
+
+-- Solution tracker
+agent Solution data {
+  status: "searching"
+  path_found: "none"
+  attempts: 0
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 3 within 15000 {
+  permanent PathAttempt1
+  permanent PathAttempt2
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- CHECKPOINT: Record starting state
+-- ═══════════════════════════════════════════════════════════
+
+link Problem <-> Solution priority critical {
+  >> { quality: attending, priority: 1.0, confidence: 0.5, half_life: 500 }
+     "Checkpoint: recording starting state"
+
+  connect depth partial {
+    signal attending 0.7 between data "saving start position: A"
+  }
+
+  Problem ~ Solution until synchronized
+
+  => when sync_level > 0.5 depth partial {
+    checkpoint_state <- "A"
+    checkpoint_id <- "start"
+    attempts_so_far <- "0"
+  }
+
+  -- Commit checkpoint before exploring
+  * from apply {
+    stage: "checkpoint"
+    position: "A"
+    type: "start"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- ATTEMPT 1: Try path A → B
+-- High priority (try first).
+-- This leads to a dead end → reject.
+-- ═══════════════════════════════════════════════════════════
+
+link Problem <-> PathAttempt1 priority high {
+  >> { quality: attending, priority: 0.9, confidence: 0.6, half_life: 200 }
+     "Attempt 1: trying path A → B"
+
+  connect depth deep {
+    signal attending   0.8  between data "exploring edge A → B"
+    signal recognizing 0.7  inward  data "reached node B"
+    signal questioning 0.6  inward  data "can we continue from B?"
+    signal disturbed   0.8  inward  data "B is a dead end — no outgoing edges to D"
+  }
+
+  Problem ~ PathAttempt1 until resonating
+
+  -- REJECT: dead end. This IS the backtrack.
+  <= when confidence <= 0.4 data "BACKTRACK: path A→B leads to dead end"
+
+  => when sync_level > 0.7 depth deep {
+    attempt1_path <- "A → B"
+    attempt1_result <- "dead_end"
+    attempt1_reason <- "B has no edge to D"
+    attempt1_confidence <- "0.0"
+  }
+
+  -- Commit records the failed attempt (for learning)
+  * from apply {
+    stage: "attempt"
+    number: "1"
+    path: "A → B"
+    result: "dead_end"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- ATTEMPT 2: Try path A → C → D
+-- Normal priority (try second, after first fails).
+-- This succeeds!
+-- ═══════════════════════════════════════════════════════════
+
+link Problem <-> PathAttempt2 priority normal {
+  >> { quality: attending, priority: 0.85, confidence: 0.7, half_life: 200 }
+     "Attempt 2: trying path A → C"
+
+  connect depth deep {
+    signal attending   0.85 between data "exploring edge A → C"
+    signal recognizing 0.8  inward  data "reached node C"
+    signal questioning 0.7  inward  data "can we continue from C?"
+    signal recognizing 0.9  inward  data "C has edge to D — goal reachable!"
+  }
+
+  Problem ~ PathAttempt2 until resonating
+
+  <= when confidence <= 0.4 data "BACKTRACK: path A→C also failed"
+
+  => when sync_level > 0.7 depth deep {
+    attempt2_path <- "A → C → D"
+    attempt2_result <- "success"
+    attempt2_reason <- "C connects to D"
+    attempt2_confidence <- "0.95"
+  }
+
+  * from apply {
+    stage: "attempt"
+    number: "2"
+    path: "A → C → D"
+    result: "success"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SOLUTION: Record the successful path
+-- ═══════════════════════════════════════════════════════════
+
+link PathAttempt2 <-> Solution priority low {
+  >> { quality: recognizing, priority: 0.7, confidence: 0.9, half_life: 300 }
+     "Recording solution path"
+
+  connect depth full {
+    signal recognizing 0.8 between data "solution found after backtracking"
+  }
+
+  PathAttempt2 ~ Solution until synchronized
+
+  => when sync_level > 0.5 depth deep {
+    solution_path <- PathAttempt2.attempt2_path
+    solution_confidence <- PathAttempt2.attempt2_confidence
+    total_attempts <- "2"
+    failed_paths <- PathAttempt1.attempt1_path
+    failed_reasons <- PathAttempt1.attempt1_reason
+    backtrack_count <- "1"
+    search_strategy <- "depth-first with backtracking"
+    history_note <- "attempt 1 (A→B dead_end) is preserved in commit history — ANWE never erases failed paths"
+  }
+
+  * from apply {
+    stage: "solution"
+    path: "A → C → D"
+    attempts: 2
+    backtracks: 1
+  }
+}

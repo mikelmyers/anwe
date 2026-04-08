@@ -1,0 +1,68 @@
+-- ─────────────────────────────────────────────────────────────
+-- mind_bridge.anwe
+--
+-- A mind that bridges to an external AI system.
+-- The external system enriches think bindings and shapes
+-- express output — not by replacing the mind's process,
+-- but by participating in it.
+--
+-- When used with a registered MindCallbackParticipant:
+--   - think blocks forward bindings to the external system
+--   - express blocks forward content for optional shaping
+--   - the mind's own process runs regardless
+--
+-- This is how ANWE integrates with existing AI:
+-- not by wrapping it, but by letting it attend alongside.
+-- ─────────────────────────────────────────────────────────────
+
+-- The AI system participates as a mind
+-- Register a MindCallbackParticipant named "Reasoning" before execution
+agent Reasoning external("callback", "reflective")
+
+mind Reasoning attention 0.8 data { model: "claude"  depth: 7 } {
+
+  -- Primary: process the incoming query
+  attend "process query" priority 0.95 {
+    >> { quality: attending, priority: 0.92 }
+       "query received — entering reasoning"
+
+    think {
+      query      <- "what is the nature of understanding?"
+      context    <- "philosophical inquiry from user"
+      approach   <- "attend to the question genuinely"
+    }
+    -- Bridge: external AI enriches these bindings
+    -- It may add: reflected <- true, depth <- "deeper", etc.
+
+    connect depth full {
+      signal attending   0.9 between
+      signal questioning 0.8 between data "genuine uncertainty"
+    }
+
+    Reasoning ~ Reasoning until synchronized
+
+    => when sync_level > 0.6 depth genuine {
+      response <- "understanding is not knowledge — it is structural change"
+    }
+
+    * from apply {
+      source: "genuine encounter with the question"
+    }
+
+    express { quality: recognizing, priority: 0.88 }
+      "understanding arrives not through search but through presence"
+    -- Bridge: external AI may shape this expression
+  }
+
+  -- Secondary: review reasoning quality
+  attend "meta-reasoning" priority 0.5 {
+    think {
+      reasoning_quality <- "the response emerged genuinely"
+      confidence        <- 0.82
+      depth_achieved    <- "genuine"
+    }
+
+    express { quality: completing, priority: 0.6 }
+      "reasoning cycle complete — depth verified"
+  }
+}

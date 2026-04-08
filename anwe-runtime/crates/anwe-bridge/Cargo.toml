@@ -1,0 +1,8 @@
+[package]
+name = "anwe-bridge"
+version.workspace = true
+edition.workspace = true
+description = "ANWE bridge — the protocol for external participation in signal exchange"
+
+[dependencies]
+anwe-core = { workspace = true }

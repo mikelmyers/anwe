@@ -1,0 +1,68 @@
+-- STREAMING RESPONSE ASSEMBLER IN ANWE
+-- Token chunks arrive → assemble → deliver complete response.
+
+agent Source data {
+  tokens: [" Hello", " world", " from", " ANWE"]
+}
+
+agent Assembler attention 0.9 external("callback", "assembler") data {
+  buffer: ""
+  chunk_count: 0
+}
+
+agent Destination data {
+  response: ""
+}
+
+link Source <-> Assembler priority high {
+  >> { quality: attending, priority: 0.9, confidence: 0.95, half_life: 200 }
+     "Begin streaming assembly"
+
+  connect depth full {
+    signal attending   0.85 between data "token stream starting"
+    signal recognizing 0.8  inward  data "assembler ready"
+  }
+
+  Source ~ Assembler until synchronized
+
+  each chunk in Source.tokens {
+    => when sync_level > 0.5 depth partial {
+      current_chunk <- chunk
+    }
+
+    * from apply {
+      stage: "assembling"
+    }
+  }
+
+  => when sync_level > 0.7 depth deep {
+    total_chunks <- 4
+    assembly_status <- "complete"
+  }
+
+  * from apply {
+    stage: "stream_complete"
+  }
+}
+
+link Assembler <-> Destination priority normal {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.9, half_life: 300 }
+     "Delivering assembled response"
+
+  connect depth deep {
+    signal recognizing 0.9 between data "assembled response ready"
+    signal attending   0.8 inward  data "destination accepting"
+  }
+
+  Assembler ~ Destination until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    final_response <- " Hello world from ANWE"
+    delivery_status <- "delivered"
+  }
+
+  * from apply {
+    stage: "delivery"
+    status: "complete"
+  }
+}

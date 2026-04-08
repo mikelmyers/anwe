@@ -1,0 +1,212 @@
+-- ─────────────────────────────────────────────────────────
+-- mnemonic_bridge.anwe
+--
+-- First bridge program: ANWE coordinating Mnemonic memory.
+--
+-- Mnemonic is Primordia's memory system. It knows nothing
+-- about ANWE. The MnemonicParticipant adapter translates
+-- between signal exchange and memory operations.
+--
+-- This program demonstrates:
+--   - External participant via bridge protocol
+--   - Memory retrieval through ATTENDING signals
+--   - Knowledge queries through QUESTIONING signals
+--   - Memory storage through APPLYING signals
+--   - Consolidation through COMPLETING signals
+--   - Pattern detection through RECOGNIZING signals
+--   - Health monitoring through DISTURBED signals
+--
+-- The ANWE runtime handles scheduling, synchronization,
+-- and state transitions. Mnemonic just stores and retrieves.
+-- Neither system is modified. The bridge connects them.
+-- ─────────────────────────────────────────────────────────
+
+-- Mnemonic lives outside the runtime — it's a Python system
+agent Memory external("python", "primordia.mnemonic")
+
+-- Internal agents that coordinate with memory
+agent Thinker attention 0.8 data { role: "reasoning" }
+agent Observer attention 0.7 data { role: "perception" }
+agent Curator attention 0.5 data { role: "memory management" }
+
+-- Supervision: Thinker and Observer are essential, Curator can wait
+supervise one_for_one max_restarts 3 within 5000 {
+    permanent Thinker
+    permanent Observer
+    transient Curator
+}
+
+-- ═══════════════════════════════════════════════════════════
+-- MEMORY RETRIEVAL: Observer notices something and asks Memory
+-- ═══════════════════════════════════════════════════════════
+
+link Observer <-> Memory priority high {
+
+    -- Observer has perceived something that needs context
+    >> { quality: attending, priority: 0.8, confidence: 0.7 }
+       "perceived pattern needs memory context"
+
+    -- Establish bidirectional presence
+    connect depth full {
+        signal attending   0.8 between data "what do you remember about this"
+        signal questioning 0.7 between data "any relevant prior experience"
+    }
+
+    -- Find shared rhythm between perception and memory
+    Observer ~ Memory until synchronized
+
+    -- If sync is strong enough, integrate the memory response
+    => when sync_level > 0.6 depth genuine {
+        context    <- "memory context retrieved"
+        relevance  <- "high confidence match"
+    }
+
+    * from apply {
+        source:  "observer-memory retrieval"
+        channel: "perceptual context"
+    }
+}
+
+-- ═══════════════════════════════════════════════════════════
+-- REASONING WITH MEMORY: Thinker asks Memory questions
+-- ═══════════════════════════════════════════════════════════
+
+link Thinker <-> Memory priority high {
+
+    -- Thinker has a question that needs historical knowledge
+    >> { quality: questioning, priority: 0.85, confidence: 0.6 }
+       "reasoning requires historical knowledge"
+
+    connect depth deep {
+        signal questioning 0.9 between data "what does experience suggest"
+        signal recognizing 0.7 between data "match against known patterns"
+    }
+
+    -- Deep sync — reasoning needs strong alignment with memory
+    Thinker ~ Memory until sync_level > 0.8 decay 500
+
+    -- Only apply if memory provides high-confidence answers
+    => when confidence > 0.7 depth genuine {
+        knowledge      <- "semantic knowledge integrated"
+        episodic_match <- "relevant episodes found"
+    }
+
+    when attention > 0.3 {
+        * from apply {
+            source: "thinker-memory reasoning"
+            method: "knowledge-augmented"
+        }
+    }
+}
+
+-- ═══════════════════════════════════════════════════════════
+-- MEMORY STORAGE: Thinker commits new knowledge to Memory
+-- ═══════════════════════════════════════════════════════════
+
+link Thinker <-> Memory {
+
+    -- Thinker has produced a conclusion worth remembering
+    >> { quality: applying, priority: 0.7, confidence: 0.8 }
+       "new knowledge ready for storage"
+
+    connect depth surface {
+        signal applying 0.7 outward data "store this conclusion"
+    }
+
+    Thinker ~ Memory until synchronized
+
+    => when sync_level > 0.5 {
+        stored     <- "conclusion committed to memory"
+        memory_id  <- "assigned by mnemonic"
+    }
+
+    * from apply {
+        source: "thinker-memory storage"
+        type:   "episodic"
+    }
+}
+
+-- ═══════════════════════════════════════════════════════════
+-- CONSOLIDATION: Curator manages memory health
+-- Background priority — runs when nothing urgent is happening
+-- ═══════════════════════════════════════════════════════════
+
+link Curator <-> Memory priority low {
+
+    -- Time to consolidate and clean up
+    >> { quality: completing, priority: 0.4, confidence: 0.9, half_life: 1000 }
+       "initiating memory consolidation cycle"
+
+    connect depth surface {
+        signal completing 0.4 between data "consolidation sweep"
+        signal resting    0.3 between data "report statistics"
+    }
+
+    -- Slow sync with decay — memory management is patient
+    Curator ~ Memory until synchronized decay 200
+
+    => when sync_level > 0.5 {
+        consolidated <- "memories merged and pruned"
+        statistics   <- "health report generated"
+    }
+
+    * from apply {
+        source: "curator-memory consolidation"
+        cycle:  "background"
+    }
+}
+
+-- ═══════════════════════════════════════════════════════════
+-- PATTERN RECOGNITION: Observer asks Memory to find patterns
+-- ═══════════════════════════════════════════════════════════
+
+link Observer <-> Memory {
+
+    >> { quality: recognizing, priority: 0.6, confidence: 0.5 }
+       "requesting pattern analysis across memories"
+
+    connect depth full {
+        signal recognizing 0.7 between data "what patterns do you see"
+        signal attending   0.5 between data "focus on recurring themes"
+    }
+
+    Observer ~ Memory until synchronized
+
+    => when sync_level > 0.6 {
+        patterns   <- "detected by mnemonic analysis"
+        themes     <- "recurring themes extracted"
+    }
+
+    * from apply {
+        source: "observer-memory patterns"
+        type:   "analysis"
+    }
+}
+
+-- ═══════════════════════════════════════════════════════════
+-- HEALTH CHECK: Curator monitors Memory system health
+-- Lowest priority — only when everything else is done
+-- ═══════════════════════════════════════════════════════════
+
+link Curator <-> Memory priority background {
+
+    >> { quality: disturbed, priority: 0.3, confidence: 0.4, half_life: 50 }
+       "routine health check on memory system"
+
+    connect depth surface {
+        signal disturbed 0.3 between data "status report please"
+    }
+
+    Curator ~ Memory until synchronized
+
+    when confidence > 0.3 {
+        => when sync_level > 0.4 {
+            health_status <- "memory system health assessed"
+        }
+
+        * from apply {
+            source: "curator-memory health"
+            type:   "monitoring"
+        }
+    }
+}

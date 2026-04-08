@@ -1,0 +1,334 @@
+-- ─────────────────────────────────────────────────────────
+-- TRAINING LOOP IN ANWE
+--
+-- 3 epochs: forward(Dataset<->Model) → loss(Model<->LossFunction)
+--   → optimize(LossFunction<->Optimizer)
+--
+-- Learning rate decay modeled via half_life on signals.
+-- Checkpoint commits at each epoch boundary.
+-- Validation reject for early stopping.
+--
+-- What this proves about ANWE:
+--   - Link sequences as training steps
+--   - Half_life as learning rate decay
+--   - Commit as model checkpoint
+--   - Reject as early stopping criterion
+--
+-- BUILDSHEET items covered:
+--   [x] Training loop (ML Training)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+agent Dataset data {
+  name: "ImageNet-1k"
+  samples: 1281167
+  batch_size: 256
+}
+
+agent Model attention 0.9 external("callback", "model") data {
+  architecture: "ResNet-50"
+  parameters: "25.6M"
+  learning_rate: "0.001"
+}
+
+agent LossFunction attention 0.7 external("callback", "loss") data {
+  type: "cross_entropy"
+  reduction: "mean"
+}
+
+agent Optimizer attention 0.6 external("callback", "optimizer") data {
+  type: "AdamW"
+  weight_decay: "0.01"
+  beta1: "0.9"
+  beta2: "0.999"
+}
+
+agent Checkpoint data {
+  epoch: 0
+  best_loss: "inf"
+  best_accuracy: "0.0"
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 3 within 30000 {
+  permanent Model
+  permanent LossFunction
+  permanent Optimizer
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- EPOCH 1: Forward pass (half_life: 500 — fresh learning rate)
+-- ═══════════════════════════════════════════════════════════
+
+link Dataset <-> Model priority high {
+  >> { quality: attending, priority: 0.95, confidence: 0.7, half_life: 500 }
+     "Epoch 1: forward pass — computing predictions"
+
+  connect depth deep {
+    signal attending   0.9  between data "feeding batch through ResNet-50"
+    signal recognizing 0.7  inward  data "computing logits for 256-sample batch"
+  }
+
+  Dataset ~ Model until resonating
+
+  => when sync_level > 0.7 depth deep {
+    epoch1_predictions <- "batch logits computed"
+    epoch1_lr <- "0.001"
+    epoch1_batch <- "256"
+  }
+
+  * from apply {
+    stage: "forward"
+    epoch: "1"
+    lr: "0.001"
+  }
+}
+
+-- Epoch 1: Loss computation
+link Model <-> LossFunction priority high {
+  >> { quality: recognizing, priority: 0.9, confidence: 0.75, half_life: 500 }
+     "Epoch 1: computing cross-entropy loss"
+
+  connect depth deep {
+    signal recognizing 0.8  between data "comparing predictions to ground truth labels"
+    signal questioning 0.6  inward  data "measuring prediction error"
+  }
+
+  Model ~ LossFunction until resonating
+
+  => when sync_level > 0.7 depth deep {
+    epoch1_loss <- "2.34"
+    epoch1_accuracy <- "0.42"
+    epoch1_gradients <- "computed"
+  }
+
+  * from apply {
+    stage: "loss"
+    epoch: "1"
+    loss: "2.34"
+  }
+}
+
+-- Epoch 1: Optimization step
+link LossFunction <-> Optimizer priority high {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.8, half_life: 500 }
+     "Epoch 1: optimizer step — updating weights"
+
+  connect depth deep {
+    signal recognizing 0.8  between data "applying AdamW update with gradients"
+    signal attending   0.75 between data LossFunction.epoch1_loss
+  }
+
+  LossFunction ~ Optimizer until resonating
+
+  => when sync_level > 0.7 depth deep {
+    epoch1_updated <- "true"
+    epoch1_weight_norm <- "12.4"
+    epoch1_grad_norm <- "0.85"
+  }
+
+  * from apply {
+    stage: "optimize"
+    epoch: "1"
+    checkpoint: "saved"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- EPOCH 2: Decayed half_life (300) — learning rate decaying
+-- ═══════════════════════════════════════════════════════════
+
+link Dataset <-> Model priority high {
+  >> { quality: attending, priority: 0.9, confidence: 0.8, half_life: 300 }
+     "Epoch 2: forward pass — learning rate decayed"
+
+  connect depth deep {
+    signal attending   0.88 between data "epoch 2 forward pass with decayed learning rate"
+    signal recognizing 0.8  inward  data "model improving from epoch 1 weights"
+  }
+
+  Dataset ~ Model until resonating
+
+  => when sync_level > 0.7 depth deep {
+    epoch2_predictions <- "batch logits computed"
+    epoch2_lr <- "0.0005"
+    epoch2_batch <- "256"
+  }
+
+  * from apply {
+    stage: "forward"
+    epoch: "2"
+    lr: "0.0005"
+  }
+}
+
+link Model <-> LossFunction priority high {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.82, half_life: 300 }
+     "Epoch 2: computing loss — expecting improvement"
+
+  connect depth deep {
+    signal recognizing 0.82 between data "loss should decrease from epoch 1"
+    signal attending   0.75 between data Model.epoch1_loss
+  }
+
+  Model ~ LossFunction until resonating
+
+  => when sync_level > 0.7 depth deep {
+    epoch2_loss <- "1.12"
+    epoch2_accuracy <- "0.68"
+    epoch2_improvement <- "loss decreased 52%"
+  }
+
+  * from apply {
+    stage: "loss"
+    epoch: "2"
+    loss: "1.12"
+  }
+}
+
+link LossFunction <-> Optimizer priority high {
+  >> { quality: recognizing, priority: 0.8, confidence: 0.85, half_life: 300 }
+     "Epoch 2: optimizer step with decayed learning rate"
+
+  connect depth deep {
+    signal recognizing 0.85 between data "applying AdamW update"
+    signal attending   0.8  between data LossFunction.epoch2_loss
+  }
+
+  LossFunction ~ Optimizer until resonating
+
+  => when sync_level > 0.7 depth deep {
+    epoch2_updated <- "true"
+    epoch2_weight_norm <- "11.8"
+    epoch2_grad_norm <- "0.42"
+  }
+
+  * from apply {
+    stage: "optimize"
+    epoch: "2"
+    checkpoint: "saved"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- EPOCH 3: Further decay (half_life: 150) — fine-tuning
+-- ═══════════════════════════════════════════════════════════
+
+link Dataset <-> Model priority normal {
+  >> { quality: attending, priority: 0.85, confidence: 0.85, half_life: 150 }
+     "Epoch 3: forward pass — fine-tuning phase"
+
+  connect depth deep {
+    signal attending   0.85 between data "epoch 3 forward pass — small learning rate"
+    signal recognizing 0.82 inward  data "model near convergence"
+  }
+
+  Dataset ~ Model until resonating
+
+  => when sync_level > 0.7 depth deep {
+    epoch3_predictions <- "batch logits computed"
+    epoch3_lr <- "0.00025"
+    epoch3_batch <- "256"
+  }
+
+  * from apply {
+    stage: "forward"
+    epoch: "3"
+    lr: "0.00025"
+  }
+}
+
+link Model <-> LossFunction priority normal {
+  >> { quality: recognizing, priority: 0.8, confidence: 0.88, half_life: 150 }
+     "Epoch 3: computing loss — convergence check"
+
+  connect depth deep {
+    signal recognizing 0.88 between data "checking if loss is still decreasing"
+    signal questioning 0.7  inward  data "diminishing returns expected"
+  }
+
+  Model ~ LossFunction until resonating
+
+  -- Validation reject for early stopping
+  <= when confidence <= 0.3 data "validation loss increasing — early stopping triggered"
+
+  => when sync_level > 0.7 depth deep {
+    epoch3_loss <- "0.89"
+    epoch3_accuracy <- "0.76"
+    epoch3_improvement <- "loss decreased 21%"
+    convergence_status <- "approaching"
+  }
+
+  * from apply {
+    stage: "loss"
+    epoch: "3"
+    loss: "0.89"
+  }
+}
+
+link LossFunction <-> Optimizer priority normal {
+  >> { quality: recognizing, priority: 0.75, confidence: 0.88, half_life: 150 }
+     "Epoch 3: final optimizer step"
+
+  connect depth deep {
+    signal recognizing 0.88 between data "applying final AdamW update"
+    signal attending   0.85 between data LossFunction.epoch3_loss
+  }
+
+  LossFunction ~ Optimizer until resonating
+
+  => when sync_level > 0.7 depth deep {
+    epoch3_updated <- "true"
+    epoch3_weight_norm <- "11.5"
+    epoch3_grad_norm <- "0.21"
+  }
+
+  * from apply {
+    stage: "optimize"
+    epoch: "3"
+    checkpoint: "saved"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- CHECKPOINT: Record training summary
+-- ═══════════════════════════════════════════════════════════
+
+link Optimizer <-> Checkpoint priority background {
+  >> { quality: recognizing, priority: 0.5, confidence: 0.9, half_life: 100 }
+     "Recording final training checkpoint"
+
+  connect depth full {
+    signal recognizing 0.7 between data "saving best model state"
+  }
+
+  Optimizer ~ Checkpoint until synchronized
+
+  => when sync_level > 0.3 depth deep {
+    final_loss <- LossFunction.epoch3_loss
+    final_accuracy <- LossFunction.epoch3_accuracy
+    total_epochs <- "3"
+    lr_schedule <- "0.001 → 0.0005 → 0.00025"
+    best_epoch <- "3"
+    training_summary <- "loss: 2.34 → 1.12 → 0.89, accuracy: 0.42 → 0.68 → 0.76"
+  }
+
+  * from apply {
+    stage: "checkpoint"
+    final_loss: "0.89"
+    final_accuracy: "0.76"
+    epochs: 3
+  }
+}

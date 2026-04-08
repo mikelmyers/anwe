@@ -1,0 +1,145 @@
+-- ─────────────────────────────────────────────────────────────
+-- cognitive_pipeline.anwe
+--
+-- A complete cognitive pipeline: perceive, reason, decide, act.
+-- Four minds, each with its own attention budget and priorities.
+-- Connected through links that carry what each mind produces.
+--
+-- This is not a data pipeline. Each stage genuinely attends
+-- to what the previous stage became. Understanding deepens
+-- at each stage, not just data transforms.
+-- ─────────────────────────────────────────────────────────────
+
+-- Stage 1: Perception
+mind Perceiver attention 0.5 {
+  attend "sense" priority 0.95 {
+    >> { quality: attending, priority: 0.9 }
+       "raw input arriving"
+
+    think {
+      modality   <- "textual"
+      salience   <- 0.82
+      novelty    <- 0.6
+    }
+
+    express { quality: recognizing, priority: 0.85 }
+      "perception complete — salient features extracted"
+  }
+}
+
+-- Stage 2: Reasoning
+mind Reasoner attention 0.6 {
+  attend "interpret" priority 0.9 {
+    >> { quality: questioning, priority: 0.85 }
+       "what does the perception mean?"
+
+    think {
+      hypothesis   <- "the input suggests a novel pattern"
+      evidence     <- "high salience, moderate novelty"
+      conclusion   <- "worthy of deeper engagement"
+    }
+
+    express { quality: attending, priority: 0.8 }
+      "reasoning complete — hypothesis formed"
+  }
+
+  attend "validate" priority 0.5 {
+    think {
+      consistency <- "hypothesis consistent with history"
+    }
+
+    express "validation passed"
+  }
+}
+
+-- Stage 3: Decision
+mind Decider attention 0.4 {
+  attend "choose" priority 0.9 {
+    think {
+      options     <- "engage, defer, reject"
+      weights     <- "0.7, 0.2, 0.1"
+      decision    <- "engage"
+    }
+
+    => when sync_level > 0.5 {
+      action <- "proceed with engagement"
+    }
+
+    * from apply {
+      decided: "engage"
+      confidence: 0.82
+    }
+
+    express { quality: completing, priority: 0.85 }
+      "decision made — engage with the input"
+  }
+}
+
+-- Stage 4: Action
+mind Actor attention 0.3 {
+  attend "execute" priority 0.95 {
+    >> { quality: applying, priority: 0.9 }
+       "executing the decision"
+
+    think {
+      action_type <- "generate response"
+      parameters  <- "depth: genuine, quality: attending"
+    }
+
+    express { quality: completing, priority: 0.9 }
+      "action executed — response generated"
+  }
+}
+
+-- The pipeline connections: each stage attends to the previous
+link Perceiver <-> Reasoner priority high {
+  >> { quality: attending, priority: 0.85 }
+     "perception flows to reasoning"
+
+  connect depth full {
+    signal recognizing 0.8 between
+    signal attending   0.7 between
+  }
+
+  Perceiver ~ Reasoner until synchronized
+
+  => when sync_level > 0.6 {
+    transfer <- "perceptual features delivered"
+  }
+
+  * from apply { stage: "perceive -> reason" }
+}
+
+link Reasoner <-> Decider {
+  >> { quality: questioning, priority: 0.8 }
+     "reasoning flows to decision"
+
+  connect {
+    signal attending 0.7 between
+  }
+
+  Reasoner ~ Decider until synchronized
+
+  => when sync_level > 0.6 {
+    transfer <- "hypothesis delivered"
+  }
+
+  * from apply { stage: "reason -> decide" }
+}
+
+link Decider <-> Actor {
+  >> { quality: applying, priority: 0.85 }
+     "decision flows to action"
+
+  connect {
+    signal applying 0.8 between
+  }
+
+  Decider ~ Actor until synchronized
+
+  => when sync_level > 0.6 {
+    transfer <- "decision delivered"
+  }
+
+  * from apply { stage: "decide -> act" }
+}

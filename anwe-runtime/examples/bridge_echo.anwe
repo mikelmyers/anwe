@@ -1,0 +1,49 @@
+-- ─────────────────────────────────────────
+-- ANWE v0.1 — BRIDGE EXAMPLE
+-- External participant coordinated by .anwe
+--
+-- This program demonstrates the bridge protocol.
+-- The Sensor agent lives outside the ANWE runtime —
+-- it could be Python, a neural network, a hardware sensor,
+-- or anything that implements the Participant trait.
+--
+-- The ANWE runtime handles state transitions, scheduling,
+-- and synchronization. The external participant just
+-- receives signals and responds.
+-- ─────────────────────────────────────────
+
+-- An external participant — lives outside the runtime
+agent Sensor external("callback", "echo")
+
+-- An internal agent — lives inside the runtime
+agent Processor
+
+-- Open a link between internal and external
+link Sensor <-> Processor {
+
+  -- Alert: something arrived from outside
+  >> { quality: attending, priority: 0.8 }
+     "incoming sensor data"
+
+  -- Connect: establish bidirectional presence
+  connect depth full {
+    signal attending   0.7 between
+    signal questioning 0.6 between data "what do you see"
+    signal recognizing 0.5 inward
+  }
+
+  -- Sync: find shared rhythm
+  Sensor ~ Processor until synchronized
+
+  -- Apply: structural changes cross the boundary
+  => when sync_level > 0.6 depth genuine {
+    reading  <- "sensor observation received"
+    analyzed <- "processed through attention"
+  }
+
+  -- Commit: permanent record
+  * from apply {
+    source:  "external sensor via bridge"
+    status:  "integrated"
+  }
+}

@@ -1,0 +1,207 @@
+-- ─────────────────────────────────────────────────────────
+-- FALLBACK CHAIN IN ANWE
+--
+-- 3-tier model cascade:
+--   FastModel (high priority) → MidModel (normal) → PremiumModel (low)
+--
+-- Reject gates at each tier drop on low confidence.
+-- Response collects the best available answer.
+-- Priority ordering = try cheapest model first.
+--
+-- What this proves about ANWE:
+--   - Link priority as tier preference
+--   - Reject as quality gate (not error)
+--   - Sequential fallback via link ordering
+--   - FieldAccess reads from whichever tier succeeds
+--
+-- BUILDSHEET items covered:
+--   [x] Fallback chain (LLM Patterns)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+agent Query data {
+  text: "Derive the Euler-Lagrange equation from the principle of stationary action"
+  complexity: "high"
+  required_confidence: "0.8"
+}
+
+-- Tier 1: Fast, cheap model
+agent FastModel attention 0.7 external("callback", "fast_model") data {
+  model: "llama-7b"
+  cost: "low"
+  latency: "50ms"
+  max_tokens: 256
+}
+
+-- Tier 2: Mid-range model
+agent MidModel attention 0.8 external("callback", "mid_model") data {
+  model: "llama-13b"
+  cost: "medium"
+  latency: "200ms"
+  max_tokens: 1024
+}
+
+-- Tier 3: Premium model (last resort)
+agent PremiumModel attention 0.9 external("callback", "premium_model") data {
+  model: "llama-70b"
+  cost: "high"
+  latency: "800ms"
+  max_tokens: 4096
+}
+
+-- Response collector
+agent Response data {
+  status: "pending"
+  tier_used: "unknown"
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 3 within 20000 {
+  permanent FastModel
+  permanent MidModel
+  permanent PremiumModel
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- TIER 1: Try FastModel first (high priority, cheapest)
+-- ═══════════════════════════════════════════════════════════
+
+link Query <-> FastModel priority high {
+  >> { quality: attending, priority: 0.9, confidence: 0.6, half_life: 200 }
+     "Tier 1: attempting FastModel (7B, cheapest)"
+
+  connect depth partial {
+    signal attending   0.7  between data "fast model attempting complex derivation"
+    signal questioning 0.6  inward  data "query may be too complex for 7B"
+    signal disturbed   0.5  inward  data "low confidence on mathematical derivation"
+  }
+
+  Query ~ FastModel until resonating
+
+  -- Reject: confidence too low for this query
+  <= when confidence <= 0.5 data "FastModel confidence too low — falling back to MidModel"
+
+  => when sync_level > 0.7 depth deep {
+    fast_answer <- "The Euler-Lagrange equation relates to calculus of variations..."
+    fast_confidence <- "0.45"
+    fast_tokens <- "64"
+    fast_latency <- "48ms"
+  }
+
+  * from apply {
+    stage: "tier1"
+    model: "fast"
+    confidence: "0.45"
+    result: "rejected"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- TIER 2: Try MidModel (normal priority, moderate cost)
+-- ═══════════════════════════════════════════════════════════
+
+link Query <-> MidModel priority normal {
+  >> { quality: attending, priority: 0.8, confidence: 0.7, half_life: 300 }
+     "Tier 2: attempting MidModel (13B)"
+
+  connect depth deep {
+    signal attending   0.75 between data "mid model attempting derivation"
+    signal recognizing 0.7  inward  data "better capacity but still challenging"
+    signal questioning 0.5  inward  data "can 13B handle full mathematical proof?"
+  }
+
+  Query ~ MidModel until resonating
+
+  -- Reject: still not confident enough
+  <= when confidence <= 0.5 data "MidModel confidence too low — falling back to PremiumModel"
+
+  => when sync_level > 0.7 depth deep {
+    mid_answer <- "Starting from the action functional S[q] = integral of L(q,q_dot,t)dt, consider a variation q + epsilon*eta..."
+    mid_confidence <- "0.62"
+    mid_tokens <- "256"
+    mid_latency <- "190ms"
+  }
+
+  * from apply {
+    stage: "tier2"
+    model: "mid"
+    confidence: "0.62"
+    result: "rejected"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- TIER 3: PremiumModel (low priority, expensive but reliable)
+-- ═══════════════════════════════════════════════════════════
+
+link Query <-> PremiumModel priority low {
+  >> { quality: recognizing, priority: 0.7, confidence: 0.9, half_life: 500 }
+     "Tier 3: PremiumModel (70B) — full derivation"
+
+  connect depth deep {
+    signal recognizing 0.9  between data "premium model handling complex derivation"
+    signal attending   0.88 between data "sufficient capacity for mathematical proof"
+  }
+
+  Query ~ PremiumModel until resonating
+
+  <= when confidence <= 0.5 data "even PremiumModel failed — escalate to human"
+
+  => when sync_level > 0.7 depth deep {
+    premium_answer <- "Consider the action S[q] = integral_t1^t2 L(q,dq/dt,t)dt. For a stationary path, delta S = 0. Applying variation q -> q + epsilon*eta with eta(t1)=eta(t2)=0: delta S = integral (dL/dq * eta + dL/dq_dot * d_eta/dt) dt. Integration by parts on second term: = integral (dL/dq - d/dt(dL/dq_dot)) * eta dt = 0. Since eta is arbitrary: dL/dq - d/dt(dL/dq_dot) = 0. QED."
+    premium_confidence <- "0.94"
+    premium_tokens <- "512"
+    premium_latency <- "780ms"
+  }
+
+  * from apply {
+    stage: "tier3"
+    model: "premium"
+    confidence: "0.94"
+    result: "accepted"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- COLLECT: Best available response
+-- ═══════════════════════════════════════════════════════════
+
+link PremiumModel <-> Response priority background {
+  >> { quality: recognizing, priority: 0.5, confidence: 0.9, half_life: 100 }
+     "Collecting best response from fallback chain"
+
+  connect depth full {
+    signal recognizing 0.7 between data "selecting highest confidence response"
+  }
+
+  PremiumModel ~ Response until synchronized
+
+  => when sync_level > 0.3 depth deep {
+    final_answer <- PremiumModel.premium_answer
+    final_confidence <- PremiumModel.premium_confidence
+    tier_used <- "3 (PremiumModel)"
+    tiers_attempted <- "3"
+    total_latency <- "1018ms"
+    cost_note <- "fast(rejected) → mid(rejected) → premium(accepted)"
+    fallback_path <- "7B(0.45) → 13B(0.62) → 70B(0.94)"
+  }
+
+  * from apply {
+    stage: "response"
+    tier: "3"
+    confidence: "0.94"
+    attempts: 3
+  }
+}

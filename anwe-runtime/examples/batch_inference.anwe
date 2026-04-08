@@ -1,0 +1,106 @@
+-- BATCH INFERENCE SCHEDULER IN ANWE
+-- 4 items batched → parallel process → collect results.
+
+agent BatchQueue data {
+  items: ["query_1", "query_2", "query_3", "query_4"]
+  batch_size: 4
+}
+
+agent Scheduler attention 0.9 data {
+  strategy: "parallel"
+  max_concurrent: 4
+}
+
+agent Model external("callback", "model") data {
+  model_name: "gpt-4"
+  tokens_per_sec: 150
+}
+
+agent ResultStore data {
+  results: []
+  completed: 0
+}
+
+supervise one_for_one max_restarts 3 within 30000 {
+  permanent Model
+}
+
+link BatchQueue <-> Scheduler priority high {
+  >> { quality: attending, priority: 0.95, confidence: 0.9, half_life: 200 }
+     "Processing batch of 4 items"
+
+  connect depth full {
+    signal attending   0.9  between data "batch queue ready"
+    signal recognizing 0.85 inward  data "scheduler accepting"
+  }
+
+  BatchQueue ~ Scheduler until synchronized
+
+  each item in BatchQueue.items {
+    => when sync_level > 0.5 depth partial {
+      current_item <- item
+      status <- "scheduled"
+    }
+
+    * from apply {
+      stage: "scheduling"
+    }
+  }
+
+  => when sync_level > 0.7 depth deep {
+    batch_scheduled <- "all 4 items queued"
+    total_items <- 4
+  }
+
+  * from apply {
+    stage: "batch_complete"
+  }
+}
+
+link Scheduler <-> Model priority high {
+  >> { quality: recognizing, priority: 0.9, confidence: 0.85, half_life: 200 }
+     "Executing batch inference"
+
+  connect depth deep {
+    signal recognizing 0.85 between data "model processing batch"
+    signal attending   0.8  inward  data "inference running"
+  }
+
+  Scheduler ~ Model until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    result_1 <- "response for query_1"
+    result_2 <- "response for query_2"
+    result_3 <- "response for query_3"
+    result_4 <- "response for query_4"
+    throughput <- 600
+  }
+
+  * from apply {
+    stage: "inference"
+    batch_size: 4
+  }
+}
+
+link Model <-> ResultStore priority normal {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.9, half_life: 300 }
+     "Storing batch results"
+
+  connect depth deep {
+    signal recognizing 0.9 between data "results ready for storage"
+  }
+
+  Model ~ ResultStore until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    stored_count <- 4
+    avg_latency_ms <- 27
+    total_tokens <- 2400
+    cost_cents <- 12
+  }
+
+  * from apply {
+    stage: "storage"
+    status: "complete"
+  }
+}

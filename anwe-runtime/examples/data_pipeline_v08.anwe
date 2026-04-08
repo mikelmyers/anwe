@@ -1,0 +1,215 @@
+-- ═══════════════════════════════════════════════════════════
+-- data_pipeline_v08.anwe — Data Processing Pipeline
+-- Demonstrates ANWE v0.8: "Make It Real"
+--
+-- This is a COMPLETE data pipeline written entirely in .anwe.
+-- No Rust. No Python. Just ANWE.
+--
+-- Features used:
+--   v0.6: Block expressions, operators, if/else, f-strings,
+--         agents, links, supervision
+--   v0.7: While loops, for-in loops, map literals,
+--         try/catch, sleep builtin
+--   v0.8: Break/continue, top-level assignment, structured
+--         errors, file I/O builtins
+-- ═══════════════════════════════════════════════════════════
+
+-- ─── CONFIGURATION ──────────────────────────────────────
+let max_items = 20
+let error_threshold = 0.3
+let output_path = "/tmp/anwe_pipeline_output.txt"
+
+-- ─── DATA VALIDATION ───────────────────────────────────
+-- Using structured errors for proper error handling
+
+fn validate_item(item) {
+    if is_null(item) {
+        error("validation", "item is null")
+    } else {
+        if item < 0 {
+            error("validation", f"negative value: {item}")
+        } else {
+            if item > 1000 {
+                error("validation", f"value too large: {item}")
+            } else {
+                item
+            }
+        }
+    }
+}
+
+fn validate_all(items) {
+    let valid = [];
+    let errors = [];
+    for item in items {
+        let result = validate_item(item);
+        let valid = if is_error(result) {
+            valid
+        } else {
+            append(valid, result)
+        };
+        let errors = if is_error(result) {
+            append(errors, result)
+        } else {
+            errors
+        }
+    };
+    {valid: valid, errors: errors}
+}
+
+-- ─── DATA TRANSFORMATION ──────────────────────────────
+-- Using break/continue for efficient processing
+
+fn transform(items, multiplier) {
+    let result = [];
+    for item in items {
+        -- Skip zero values
+        if item == 0 { continue };
+
+        -- Stop at sentinel value 999
+        if item == 999 { break };
+
+        let result = append(result, item * multiplier)
+    };
+    result
+}
+
+fn running_total(items) {
+    let sum = 0;
+    let totals = [];
+    for item in items {
+        let sum = sum + item;
+        let totals = append(totals, sum)
+    };
+    totals
+}
+
+fn find_first_above(items, threshold) {
+    let found = null;
+    for item in items {
+        let found = if item > threshold { item } else { found };
+        if item > threshold { break }
+    };
+    found
+}
+
+-- ─── STATISTICS ────────────────────────────────────────
+
+fn compute_stats(items) {
+    let count = len(items);
+    if count == 0 {
+        {count: 0, sum: 0, mean: 0, min: 0, max: 0}
+    } else {
+        let sum = 0;
+        let min_val = 999999;
+        let max_val = 0;
+        for item in items {
+            let sum = sum + item;
+            let min_val = if item < min_val { item } else { min_val };
+            let max_val = if item > max_val { item } else { max_val }
+        };
+        {count: count, sum: sum, mean: sum / count,
+         min: min_val, max: max_val}
+    }
+}
+
+-- ─── MAIN PIPELINE ────────────────────────────────────
+
+-- Generate test data with some edge cases
+let raw_data = [42, 0, 15, -3, 88, 0, 7, 1500, 33, 999, 100, 200]
+
+-- Step 1: Validate
+let validation = validate_all(raw_data)
+let valid_items = validation.valid
+let error_count = len(validation.errors)
+
+-- Step 2: Transform (double values, skip zeros, stop at 999)
+let transformed = transform(valid_items, 2)
+
+-- Step 3: Running totals
+let totals = running_total(transformed)
+
+-- Step 4: Statistics
+let stats = compute_stats(transformed)
+
+-- Step 5: Find threshold
+let first_big = find_first_above(transformed, 100)
+
+-- Step 6: Error rate check using top-level assignment
+let total_items = len(raw_data)
+let error_rate = error_count / total_items
+let status = if error_rate > error_threshold {
+    "WARNING: High error rate"
+} else {
+    "OK"
+}
+
+-- Step 7: Generate report
+let report = f"Pipeline Report:\n  Input items: {total_items}\n  Valid: {len(valid_items)}\n  Errors: {error_count}\n  Error rate: {error_rate}\n  Status: {status}\n  Transformed count: {len(transformed)}\n  Sum: {stats.sum}\n  Mean: {stats.mean}\n  First > 100: {first_big}"
+
+-- Step 8: Try writing to file with error handling
+let write_result = try {
+    file_write(output_path, report)
+} catch {
+    error("io", "could not write report")
+}
+
+-- ─── AGENTS ───────────────────────────────────────────
+
+agent DataSource data {
+    items_produced: 0
+    status: "ready"
+}
+
+agent Processor data {
+    items_processed: 0
+    errors_caught: 0
+}
+
+agent Reporter data {
+    last_report: "none"
+    reports_sent: 0
+}
+
+-- ─── SUPERVISION ──────────────────────────────────────
+
+supervise one_for_one max_restarts 5 within 10000 {
+    permanent DataSource
+    permanent Processor
+    transient Reporter
+}
+
+-- ─── LINKS ────────────────────────────────────────────
+
+link DataSource <-> Processor {
+    >> f"feeding {len(raw_data)} items"
+    connect depth full {
+        signal attending 0.9 outward
+    }
+    DataSource ~ Processor until synchronized
+    think {
+        items_produced <- len(raw_data)
+        status <- "streaming"
+    }
+    => when sync_level > 0.5 depth full {
+        items_processed <- len(transformed)
+        errors_caught <- error_count
+    }
+    * from apply { source: "data_feed" }
+}
+
+link Processor <-> Reporter {
+    >> f"report: {status}"
+    connect depth deep {
+        signal completing 0.85 outward
+    }
+    Processor ~ Reporter until synchronized
+    think {
+        items_processed <- len(transformed)
+        last_report <- report
+    }
+    => when sync_level > 0.5 depth deep {
+        reports_sent <- 1
+    }
+    * from apply { source: "reporting" }
+}

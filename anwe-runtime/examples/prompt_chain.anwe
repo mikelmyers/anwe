@@ -1,0 +1,196 @@
+-- ─────────────────────────────────────────────────────────
+-- PROMPT CHAIN IN ANWE
+--
+-- 3-stage sequential LLM pipeline:
+--   Summarizer → Extractor → Reporter
+--
+-- Each stage reads the previous via FieldAccess:
+--   - Summarizer produces a summary
+--   - Extractor reads Summarizer.summary, extracts key points
+--   - Reporter reads Extractor.key_points, writes final report
+--
+-- What this proves about ANWE:
+--   - FieldAccess as data flow between LLM stages
+--   - Sequential links model prompt chaining
+--   - Commit at each stage creates an audit trail
+--   - Confidence tracks quality through the chain
+--
+-- BUILDSHEET items covered:
+--   [x] Prompt chaining (LLM Patterns)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+-- Source document to summarize
+agent Document data {
+  title: "Q4 2024 Earnings Report"
+  content: "Revenue grew 23% YoY to $4.2B. Operating margin expanded to 28%. Cloud division revenue doubled. AI products contributed $800M. Headcount grew 15%. Guidance raised for FY2025."
+  word_count: "450"
+}
+
+-- Stage 1: Summarize the document
+agent Summarizer attention 0.8 external("callback", "summarizer") data {
+  role: "summarizer"
+  max_tokens: 150
+  style: "concise"
+}
+
+-- Stage 2: Extract key points from summary
+agent Extractor attention 0.7 external("callback", "extractor") data {
+  role: "key_point_extractor"
+  max_points: 5
+}
+
+-- Stage 3: Generate final report from key points
+agent Reporter attention 0.6 external("callback", "reporter") data {
+  role: "report_writer"
+  format: "executive_brief"
+}
+
+-- Final output
+agent Output data {
+  status: "pending"
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 3 within 20000 {
+  permanent Summarizer
+  permanent Extractor
+  permanent Reporter
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- STAGE 1: Document → Summarizer
+-- Produce a concise summary of the source document.
+-- ═══════════════════════════════════════════════════════════
+
+link Document <-> Summarizer priority high {
+  >> { quality: attending, priority: 0.95, confidence: 0.9, half_life: 500 }
+     "Stage 1: Summarizing source document"
+
+  connect depth deep {
+    signal attending   0.9  between data "reading source document for summarization"
+    signal recognizing 0.85 inward  data "identifying key themes and figures"
+  }
+
+  Document ~ Summarizer until resonating
+
+  <= when confidence <= 0.3 data "summarization failed — document unreadable"
+
+  => when sync_level > 0.7 depth deep {
+    summary <- "Q4 2024 revenue reached $4.2B (+23% YoY) with 28% operating margin. Cloud revenue doubled and AI products contributed $800M. Headcount grew 15%. FY2025 guidance raised."
+    summary_confidence <- "0.92"
+    summary_tokens <- "42"
+    source_title <- "Q4 2024 Earnings Report"
+  }
+
+  * from apply {
+    stage: "summarize"
+    step: "1"
+    tokens_used: 42
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- STAGE 2: Summarizer → Extractor
+-- Extract key points from the summary via FieldAccess.
+-- ═══════════════════════════════════════════════════════════
+
+link Summarizer <-> Extractor priority high {
+  >> { quality: recognizing, priority: 0.9, confidence: 0.88, half_life: 400 }
+     "Stage 2: Extracting key points from summary"
+
+  connect depth deep {
+    signal recognizing 0.88 between data Summarizer.summary
+    signal attending   0.8  inward  data "parsing summary for discrete key points"
+  }
+
+  Summarizer ~ Extractor until resonating
+
+  <= when confidence <= 0.3 data "extraction failed — summary too vague"
+
+  => when sync_level > 0.7 depth deep {
+    key_points <- "1) Revenue $4.2B +23% YoY; 2) Operating margin 28%; 3) Cloud revenue doubled; 4) AI products $800M; 5) FY2025 guidance raised"
+    point_count <- "5"
+    extraction_confidence <- "0.90"
+    source_summary <- Summarizer.summary
+  }
+
+  * from apply {
+    stage: "extract"
+    step: "2"
+    points: 5
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- STAGE 3: Extractor → Reporter
+-- Write final report from key points via FieldAccess.
+-- ═══════════════════════════════════════════════════════════
+
+link Extractor <-> Reporter priority normal {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.85, half_life: 300 }
+     "Stage 3: Generating executive report from key points"
+
+  connect depth deep {
+    signal recognizing 0.85 between data Extractor.key_points
+    signal attending   0.8  between data "composing executive brief format"
+  }
+
+  Extractor ~ Reporter until resonating
+
+  <= when confidence <= 0.3 data "report generation failed — key points insufficient"
+
+  => when sync_level > 0.7 depth deep {
+    report <- "EXECUTIVE BRIEF: Strong Q4 with $4.2B revenue (+23%). Margin expansion to 28% signals operational efficiency. Cloud and AI are primary growth drivers ($800M AI alone). Raised FY2025 guidance reflects management confidence."
+    report_confidence <- "0.88"
+    report_tokens <- "48"
+    source_points <- Extractor.key_points
+  }
+
+  * from apply {
+    stage: "report"
+    step: "3"
+    tokens_used: 48
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- COLLECT: Reporter → Output
+-- ═══════════════════════════════════════════════════════════
+
+link Reporter <-> Output priority background {
+  >> { quality: recognizing, priority: 0.5, confidence: 0.8, half_life: 100 }
+     "Collecting final report output"
+
+  connect depth full {
+    signal recognizing 0.6 between data "finalizing pipeline output"
+  }
+
+  Reporter ~ Output until synchronized
+
+  => when sync_level > 0.3 depth deep {
+    final_report <- Reporter.report
+    final_confidence <- Reporter.report_confidence
+    pipeline_stages <- "3"
+    total_tokens <- "90"
+    chain <- "Document → Summarizer → Extractor → Reporter"
+  }
+
+  * from apply {
+    stage: "output"
+    pipeline: "prompt_chain"
+    stages: 3
+  }
+}

@@ -1,0 +1,199 @@
+-- ─────────────────────────────────────────────────────────
+-- cognitive_showcase.anwe
+--
+-- Demonstrates all cognitive features of ANWE v0.1:
+--   - Attention budgets on agents
+--   - Link priority scheduling (critical/high/normal/low/background)
+--   - Signal confidence and temporal half-life
+--   - Sync decay (temporal erosion of synchronization)
+--   - Conditions on confidence and attention levels
+--   - Budget exhaustion pending handlers
+--   - Supervision trees with restart strategies
+--   - Pattern reuse with cognitive parameters
+--
+-- This is how an AI manages its own cognitive resources.
+-- Attention is finite. Confidence decays. Priority matters.
+-- ─────────────────────────────────────────────────────────
+
+-- Agents with attention budgets — each has a finite capacity
+agent Perceiver attention 0.8 data { role: "sensory intake"  lineage_depth: 42 }
+agent Reasoner attention 0.6 data { role: "logical analysis"  lineage_depth: 100 }
+agent Integrator attention 0.9 data { role: "synthesis"  lineage_depth: 75 }
+agent Guardian attention 1.0 data { role: "boundary protection"  lineage_depth: 200 }
+agent Archivist attention 0.5 data { role: "memory consolidation"  lineage_depth: 300 }
+
+-- Supervision: Guardian watches the cognitive agents
+-- If they crash, restart strategy determines recovery
+supervise one_for_one max_restarts 3 within 5000 {
+    permanent Perceiver
+    permanent Reasoner
+    transient Integrator
+    temporary Archivist
+}
+
+-- Reusable pattern: the cognitive handshake
+-- Used by multiple links to establish trust before deep work
+pattern cognitive_handshake(partner) {
+    >> { quality: attending, priority: 0.7, confidence: 0.5 }
+       "initiating cognitive handshake"
+
+    connect depth surface {
+        signal attending 0.6 between data "hello"
+        signal questioning 0.7 between data "can we work together"
+    }
+
+    sync_self ~ partner until synchronized
+}
+
+-- ═══════════════════════════════════════════════════════════
+-- CRITICAL PRIORITY: Threat detection pipeline
+-- This link runs before everything else on the scheduler.
+-- ═══════════════════════════════════════════════════════════
+
+link Guardian <-> Perceiver priority critical {
+    >> { quality: disturbed, priority: 0.99, confidence: 0.95 }
+       "threat signal detected in input stream"
+
+    connect depth deep {
+        signal disturbed 0.95 inward data "anomaly in sensory data"
+        signal attending 0.98 between data "full attention to threat"
+    }
+
+    Guardian ~ Perceiver until resonating
+
+    -- High confidence required for threat response
+    => when confidence > 0.8 depth genuine {
+        threat_assessment <- "confirmed: anomalous pattern"
+        response_level <- "elevated"
+    }
+
+    -- Check if attention budget can sustain continued vigilance
+    when attention > 0.3 {
+        emit { quality: attending, priority: 0.9, confidence: 0.9, half_life: 100 }
+            "sustained vigilance signal"
+    }
+
+    -- Handle budget exhaustion gracefully
+    pending? budget_exhausted {
+        wait 2.0 tick
+        guidance "reduce vigilance scope to conserve attention"
+    }
+
+    * from apply {
+        threat: "assessed"
+        response: "elevated"
+    }
+}
+
+-- ═══════════════════════════════════════════════════════════
+-- HIGH PRIORITY: Reasoning pipeline
+-- Important but not as urgent as threat detection.
+-- ═══════════════════════════════════════════════════════════
+
+link Reasoner <-> Integrator priority high {
+    -- Use the cognitive handshake pattern
+    ~> cognitive_handshake(Integrator)
+
+    >> { quality: questioning, priority: 0.85, confidence: 0.7, half_life: 200 }
+       "hypothesis requires integration with broader context"
+
+    connect depth full {
+        signal questioning 0.8 between data "what does the evidence suggest"
+        signal recognizing 0.85 between data "pattern matches prior experience"
+    }
+
+    -- Sync with decay — understanding erodes without maintenance
+    Reasoner ~ Integrator until sync_level > 0.8 decay 500
+
+    => when sync_level > 0.8 depth genuine {
+        conclusion <- "evidence-based synthesis"
+        confidence_level <- "high but bounded"
+    }
+
+    -- Only commit if attention reserves remain sufficient
+    when attention > 0.2 {
+        * from apply {
+            synthesis: "reasoning-integration complete"
+            method: "Bayesian"
+        }
+    }
+}
+
+-- ═══════════════════════════════════════════════════════════
+-- NORMAL PRIORITY: Perception processing
+-- Standard cognitive work.
+-- ═══════════════════════════════════════════════════════════
+
+link Perceiver <-> Integrator {
+    >> { quality: attending, priority: 0.75, confidence: 0.6 }
+       "raw perception ready for integration"
+
+    connect depth full {
+        signal attending 0.7 between data "sensory stream"
+        signal questioning 0.75 between data "what patterns emerge"
+    }
+
+    Perceiver ~ Integrator until synchronized
+
+    => when sync_level > 0.7 {
+        perception <- "integrated into working model"
+    }
+
+    * from apply {
+        channel: "perceptual"
+    }
+}
+
+-- ═══════════════════════════════════════════════════════════
+-- LOW PRIORITY: Memory consolidation
+-- Can wait. Important but not urgent.
+-- ═══════════════════════════════════════════════════════════
+
+link Archivist <-> Integrator priority low {
+    >> { quality: resting, priority: 0.4, confidence: 0.8, half_life: 1000 }
+       "ready to archive integrated knowledge"
+
+    connect depth surface {
+        signal resting 0.3 between data "background consolidation"
+    }
+
+    -- Slow sync with heavy decay — memory fades without reinforcement
+    Archivist ~ Integrator until synchronized decay 200
+
+    => when sync_level > 0.7 {
+        archived <- "knowledge consolidated to long-term"
+    }
+
+    * from apply {
+        storage: "long-term"
+        fidelity: "good"
+    }
+}
+
+-- ═══════════════════════════════════════════════════════════
+-- BACKGROUND PRIORITY: Self-reflection
+-- Runs only when nothing else needs attention.
+-- ═══════════════════════════════════════════════════════════
+
+link Integrator <-> Integrator priority background {
+    >> { quality: questioning, priority: 0.3, confidence: 0.4, half_life: 50 }
+       "am I reasoning well about my own reasoning"
+
+    connect depth deep {
+        signal questioning 0.5 inward data "metacognitive check"
+        signal recognizing 0.4 inward data "pattern of own patterns"
+    }
+
+    Integrator ~ Integrator until synchronized
+
+    -- Only commit self-reflection if confidence is high enough
+    when confidence > 0.3 {
+        => when sync_level > 0.7 depth deep {
+            metacognition <- "recursive self-model updated"
+        }
+
+        * from apply {
+            depth: "meta"
+        }
+    }
+}

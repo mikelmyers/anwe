@@ -1,0 +1,137 @@
+-- TREE OF THOUGHT IN ANWE
+-- 3 reasoning branches → evaluate → prune → converge.
+
+agent Problem data {
+  question: "A farmer has 17 sheep. All but 9 die. How many remain?"
+}
+
+agent BranchA attention 0.8 external("callback", "branch_a") data {
+  strategy: "literal_arithmetic"
+}
+
+agent BranchB attention 0.8 external("callback", "branch_b") data {
+  strategy: "careful_reading"
+}
+
+agent BranchC attention 0.8 external("callback", "branch_c") data {
+  strategy: "reframe_and_check"
+}
+
+agent Evaluator attention 0.9 data {
+  method: "confidence_weighted_vote"
+}
+
+supervise one_for_one max_restarts 2 within 15000 {
+  permanent BranchA
+  permanent BranchB
+  permanent BranchC
+}
+
+-- Branch A: literal arithmetic ("17-9=8" — WRONG)
+link Problem <-> BranchA priority high {
+  >> { quality: attending, priority: 0.9, confidence: 0.7, half_life: 200 }
+     "Branch A: literal arithmetic"
+
+  connect depth partial {
+    signal attending   0.8 between data "computing 17 minus 9"
+    signal recognizing 0.6 inward  data "17 - 9 = 8"
+  }
+
+  Problem ~ BranchA until resonating
+
+  => when sync_level > 0.7 depth partial {
+    answer_a <- "8"
+    reasoning_a <- "17 - 9 = 8"
+    confidence_a <- "0.65"
+  }
+
+  * from apply {
+    stage: "reasoning"
+    branch: "A"
+  }
+}
+
+-- Branch B: careful reading ("all but 9 die → 9 survive" — CORRECT)
+link Problem <-> BranchB priority high {
+  >> { quality: attending, priority: 0.9, confidence: 0.85, half_life: 200 }
+     "Branch B: careful reading"
+
+  connect depth deep {
+    signal attending   0.9  between data "parsing 'all but 9 die' carefully"
+    signal recognizing 0.85 inward  data "'all but 9' means 9 survive"
+  }
+
+  Problem ~ BranchB until resonating
+
+  => when sync_level > 0.7 depth deep {
+    answer_b <- "9"
+    reasoning_b <- "'All but 9 die' means 9 survive"
+    confidence_b <- "0.92"
+  }
+
+  * from apply {
+    stage: "reasoning"
+    branch: "B"
+  }
+}
+
+-- Branch C: reframe ("9 don't die → 9 remain" — CORRECT)
+link Problem <-> BranchC priority high {
+  >> { quality: attending, priority: 0.9, confidence: 0.8, half_life: 200 }
+     "Branch C: reframe and verify"
+
+  connect depth deep {
+    signal attending   0.85 between data "restating the problem"
+    signal recognizing 0.8  inward  data "reframe: 9 do not die"
+  }
+
+  Problem ~ BranchC until resonating
+
+  => when sync_level > 0.7 depth deep {
+    answer_c <- "9"
+    reasoning_c <- "9 do not die. Starting count is a distraction."
+    confidence_c <- "0.88"
+  }
+
+  * from apply {
+    stage: "reasoning"
+    branch: "C"
+  }
+}
+
+-- Evaluate: converge to best answer
+link BranchB <-> Evaluator priority normal {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.9, half_life: 300 }
+     "Evaluating all reasoning branches"
+
+  connect depth full {
+    signal recognizing 0.9  between data "collecting answers"
+    signal questioning 0.75 inward  data "which branches agree?"
+  }
+
+  BranchB ~ Evaluator until synchronized
+
+  converge BranchB <<>> Evaluator {
+    >> { quality: recognizing, priority: 0.8 }
+       BranchA.answer_a
+    >> { quality: recognizing, priority: 0.8 }
+       BranchC.answer_c
+  }
+
+  <= when confidence <= 0.3 data "no consensus"
+
+  => when sync_level > 0.5 depth deep {
+    answer_a_val <- BranchA.answer_a
+    answer_b_val <- BranchB.answer_b
+    answer_c_val <- BranchC.answer_c
+    consensus_answer <- "9"
+    branches_agreeing <- "2 of 3 (B and C)"
+    pruned_branch <- "A"
+  }
+
+  * from apply {
+    stage: "evaluation"
+    winner: "9"
+    pruned: "branch_a"
+  }
+}

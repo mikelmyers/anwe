@@ -1,0 +1,99 @@
+-- COST TRACKING IN ANWE
+-- Track per-request costs across model calls, accumulate totals.
+
+agent Request data {
+  prompt_tokens: 150
+  model: "gpt-4"
+}
+
+agent CostEngine attention 0.9 external("callback", "cost_engine") data {
+  rate_per_1k_input: 0.03
+  rate_per_1k_output: 0.06
+}
+
+agent Budget data {
+  daily_limit: 100.00
+  spent_today: 73.45
+  remaining: 26.55
+}
+
+agent Ledger data {
+  entries: []
+  total_cost: 0
+}
+
+link Request <-> CostEngine priority high {
+  >> { quality: attending, priority: 0.9, confidence: 0.95, half_life: 200 }
+     "Computing cost for request"
+
+  connect depth full {
+    signal attending   0.85 between data "calculating token costs"
+    signal recognizing 0.8  inward  data "rate lookup complete"
+  }
+
+  Request ~ CostEngine until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    input_cost <- 0.0045
+    output_cost <- 0.018
+    total_request_cost <- 0.0225
+    cost_breakdown <- "150 input tokens + 300 output tokens"
+  }
+
+  * from apply {
+    stage: "cost_calculation"
+  }
+}
+
+link CostEngine <-> Budget priority high {
+  >> { quality: recognizing, priority: 0.9, confidence: 0.9, half_life: 200 }
+     "Checking budget before execution"
+
+  connect depth deep {
+    signal recognizing 0.85 between data "budget check"
+    signal questioning 0.8  inward  data "sufficient funds?"
+  }
+
+  CostEngine ~ Budget until synchronized
+
+  if confidence > 0.5 {
+    => when sync_level > 0.7 depth deep {
+      budget_approved <- "true"
+      new_spent <- 73.4725
+      new_remaining <- 26.5275
+      utilization_pct <- 73.47
+    }
+  } else {
+    <= when confidence <= 0.3 data "budget exhausted — request denied"
+  }
+
+  * from apply {
+    stage: "budget_check"
+    approved: "true"
+  }
+}
+
+link Budget <-> Ledger priority normal {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.9, half_life: 300 }
+     "Recording cost entry in ledger"
+
+  connect depth deep {
+    signal recognizing 0.9  between data "ledger update"
+    signal attending   0.85 inward  data "entry recording"
+  }
+
+  Budget ~ Ledger until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    entry_model <- "gpt-4"
+    entry_tokens <- 450
+    entry_cost <- 0.0225
+    running_total <- 73.4725
+    entries_today <- 147
+  }
+
+  * from apply {
+    stage: "ledger"
+    status: "recorded"
+  }
+}

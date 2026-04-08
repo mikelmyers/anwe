@@ -1,0 +1,265 @@
+-- ─────────────────────────────────────────────────────────
+-- CONSENSUS PROTOCOL IN ANWE
+--
+-- Distributed models agree on a decision through
+-- multi-party convergence with quorum requirements.
+--
+-- ANWE's converge primitive + multi-party sync provides
+-- consensus as a native operation.
+--
+-- BUILDSHEET items covered:
+--   [x] Consensus protocol (Distributed AI)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS — 5 validator nodes
+-- ═══════════════════════════════════════════════════════════
+
+agent Proposer attention 0.9 data {
+  proposal: "Deploy model v2.1 to production"
+  proposal_id: "prop_0042"
+  evidence: "accuracy improved 3.2%, latency unchanged, no regression in safety benchmarks"
+}
+
+agent Validator_A attention 0.8 bridge("grpc", "node-a.internal:9090") data {
+  role: "validator"
+  reputation: 0.95
+  vote: "pending"
+  rationale: ""
+}
+
+agent Validator_B attention 0.8 bridge("grpc", "node-b.internal:9090") data {
+  role: "validator"
+  reputation: 0.92
+  vote: "pending"
+  rationale: ""
+}
+
+agent Validator_C attention 0.8 bridge("grpc", "node-c.internal:9090") data {
+  role: "validator"
+  reputation: 0.88
+  vote: "pending"
+  rationale: ""
+}
+
+agent Validator_D attention 0.7 bridge("grpc", "node-d.internal:9090") data {
+  role: "validator"
+  reputation: 0.85
+  vote: "pending"
+  rationale: ""
+}
+
+agent Validator_E attention 0.7 bridge("grpc", "node-e.internal:9090") data {
+  role: "validator"
+  reputation: 0.90
+  vote: "pending"
+  rationale: ""
+}
+
+-- Consensus state
+agent ConsensusState data {
+  quorum_required: 3
+  votes_for: 0
+  votes_against: 0
+  votes_abstain: 0
+  decided: "false"
+  decision: ""
+}
+
+-- Audit trail
+agent ConsensusAudit data {
+  proposal_id: "prop_0042"
+  round: 0
+  votes: []
+  finalized: "false"
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 5 within 60000 {
+  ConsensusState
+  ConsensusAudit
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LINKS
+-- ═══════════════════════════════════════════════════════════
+
+-- Proposer distributes proposal to all validators
+link Proposer <-> ConsensusState priority critical {
+  >> { quality: questioning, priority: 0.95, confidence: 0.9, half_life: 200 }
+     "Broadcasting proposal to all validators"
+
+  connect depth deep {
+    signal questioning 0.95 between data "proposal distribution"
+    signal attending   0.9  inward  data "awaiting validator responses"
+  }
+
+  Proposer ~ ConsensusState until synchronized
+
+  -- Broadcast proposal to all validators
+  broadcast [Validator_A, Validator_B, Validator_C, Validator_D, Validator_E] {
+    signal questioning 0.9 between data "Deploy model v2.1 — vote required"
+  }
+
+  => when sync_level > 0.7 depth deep {
+    proposal_broadcast <- "true"
+    validators_notified <- 5
+    voting_window_ticks <- 1000
+    quorum_needed <- 3
+  }
+
+  * from apply {
+    stage: "proposal_broadcast"
+    validators: 5
+  }
+}
+
+-- Each validator evaluates and votes
+link Validator_A <-> ConsensusState priority high {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.9, half_life: 300 }
+     "Validator A evaluating proposal"
+
+  connect depth deep {
+    signal recognizing 0.85 between data "reviewing evidence"
+    signal applying    0.8  inward  data "casting vote"
+  }
+
+  Validator_A ~ ConsensusState until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    vote <- "approve"
+    rationale <- "accuracy improvement significant, no safety regression"
+    confidence <- 0.92
+    reputation_weight <- 0.95
+  }
+
+  * from apply { stage: "vote" validator: "A" vote: "approve" }
+}
+
+link Validator_B <-> ConsensusState priority high {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.9, half_life: 300 }
+     "Validator B evaluating proposal"
+
+  connect depth deep {
+    signal recognizing 0.85 between data "reviewing evidence"
+    signal questioning 0.8  inward  data "latency concerns"
+  }
+
+  Validator_B ~ ConsensusState until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    vote <- "approve"
+    rationale <- "metrics look good, latency within bounds"
+    confidence <- 0.88
+    reputation_weight <- 0.92
+  }
+
+  * from apply { stage: "vote" validator: "B" vote: "approve" }
+}
+
+link Validator_C <-> ConsensusState priority high {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.85, half_life: 300 }
+     "Validator C evaluating proposal"
+
+  connect depth deep {
+    signal recognizing 0.85 between data "reviewing evidence"
+    signal disturbed   0.7  inward  data "safety concern"
+  }
+
+  Validator_C ~ ConsensusState until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    vote <- "reject"
+    rationale <- "safety benchmarks show edge case regression not covered in summary"
+    confidence <- 0.78
+    reputation_weight <- 0.88
+  }
+
+  * from apply { stage: "vote" validator: "C" vote: "reject" }
+}
+
+link Validator_D <-> ConsensusState priority high {
+  >> { quality: recognizing, priority: 0.8, confidence: 0.85, half_life: 300 }
+     "Validator D evaluating proposal"
+
+  connect depth deep {
+    signal recognizing 0.8 between data "reviewing evidence"
+    signal attending   0.7 inward  data "accuracy assessment"
+  }
+
+  Validator_D ~ ConsensusState until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    vote <- "approve"
+    rationale <- "3.2% accuracy gain justifies deployment risk"
+    confidence <- 0.85
+    reputation_weight <- 0.85
+  }
+
+  * from apply { stage: "vote" validator: "D" vote: "approve" }
+}
+
+link Validator_E <-> ConsensusState priority high {
+  >> { quality: recognizing, priority: 0.8, confidence: 0.8, half_life: 300 }
+     "Validator E evaluating proposal"
+
+  connect depth deep {
+    signal recognizing 0.8 between data "reviewing evidence"
+    signal attending   0.7 inward  data "overall assessment"
+  }
+
+  Validator_E ~ ConsensusState until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    vote <- "abstain"
+    rationale <- "insufficient context on safety edge cases raised by Validator C"
+    confidence <- 0.55
+    reputation_weight <- 0.90
+  }
+
+  * from apply { stage: "vote" validator: "E" vote: "abstain" }
+}
+
+-- Tally votes and reach consensus
+link ConsensusState <-> ConsensusAudit priority critical {
+  >> { quality: completing, priority: 0.95, confidence: 0.9, half_life: 200 }
+     "Tallying votes and determining consensus"
+
+  connect depth deep {
+    signal completing  0.95 between data "vote tally"
+    signal recognizing 0.9  inward  data "consensus determination"
+  }
+
+  ConsensusState ~ ConsensusAudit until synchronized
+
+  -- Converge all validator votes
+  converge [Validator_A, Validator_B, Validator_C, Validator_D, Validator_E] {
+    strategy: "reputation_weighted_majority"
+    quorum: 3
+    timeout_ticks: 1000
+  }
+
+  => when sync_level > 0.9 depth deep {
+    votes_for <- 3
+    votes_against <- 1
+    votes_abstain <- 1
+    weighted_support <- 0.73
+    quorum_met <- "true"
+    decided <- "true"
+    decision <- "APPROVED"
+    dissent_noted <- "Validator C raised safety edge case concern"
+    condition <- "address Validator C safety concern within 72 hours"
+  }
+
+  * from apply {
+    stage: "consensus"
+    decision: "APPROVED"
+    votes: "3-1-1"
+  }
+}

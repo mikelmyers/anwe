@@ -1,0 +1,110 @@
+-- TOOL USE ORCHESTRATOR IN ANWE
+-- Classify query → route to correct tool → return result.
+
+agent Query data {
+  text: "What is the weather in San Francisco?"
+  type: "weather"
+}
+
+agent Classifier attention 0.9 external("callback", "classifier") data {
+  tools: ["calculator", "weather", "search", "code"]
+}
+
+agent WeatherTool external("callback", "weather_tool") data {
+  api: "weather_api_v2"
+}
+
+agent SearchTool external("callback", "search_tool") data {
+  api: "search_api_v1"
+}
+
+agent ResultCollector data {
+  result: ""
+}
+
+link Query <-> Classifier priority high {
+  >> { quality: attending, priority: 0.95, confidence: 0.9, half_life: 200 }
+     "Classifying query for tool routing"
+
+  connect depth full {
+    signal attending   0.9  between data "analyzing query type"
+    signal recognizing 0.85 inward  data "tool selection ready"
+  }
+
+  Query ~ Classifier until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    selected_tool <- "weather"
+    confidence_score <- 0.92
+  }
+
+  * from apply {
+    stage: "classification"
+    selected: "weather"
+  }
+}
+
+link Classifier <-> WeatherTool priority high {
+  >> { quality: recognizing, priority: 0.9, confidence: 0.88, half_life: 200 }
+     "Routing to weather tool"
+
+  connect depth deep {
+    signal recognizing 0.85 between data "weather query incoming"
+    signal attending   0.8  inward  data "tool processing"
+  }
+
+  Classifier ~ WeatherTool until synchronized
+
+  if confidence > 0.5 {
+    => when sync_level > 0.7 depth deep {
+      weather_result <- "72F, sunny, San Francisco"
+      tool_used <- "weather"
+      latency_ms <- 45
+    }
+  }
+
+  * from apply {
+    stage: "tool_execution"
+    tool: "weather"
+  }
+}
+
+link Classifier <-> SearchTool priority low {
+  >> { quality: attending, priority: 0.5, confidence: 0.3, half_life: 100 }
+     "Search tool on standby (not selected)"
+
+  connect depth surface {
+    signal attending 0.4 between data "standby mode"
+  }
+
+  Classifier ~ SearchTool until synchronized
+
+  <= when confidence <= 0.3 data "search tool not needed for this query"
+
+  * from reject {
+    stage: "tool_routing"
+    action: "skipped_search"
+  }
+}
+
+link WeatherTool <-> ResultCollector priority normal {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.9, half_life: 300 }
+     "Delivering tool result"
+
+  connect depth deep {
+    signal recognizing 0.9 between data "result ready"
+  }
+
+  WeatherTool ~ ResultCollector until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    final_answer <- "72F, sunny in San Francisco"
+    tool_chain <- "classifier -> weather_tool"
+    total_latency <- 52
+  }
+
+  * from apply {
+    stage: "delivery"
+    status: "complete"
+  }
+}

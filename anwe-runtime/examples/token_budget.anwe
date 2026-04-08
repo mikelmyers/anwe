@@ -1,0 +1,244 @@
+-- ─────────────────────────────────────────────────────────
+-- TOKEN BUDGET MANAGEMENT IN ANWE
+--
+-- 4-stage pipeline with 4096-token budget.
+-- Budget agent tracks token usage.
+-- Summarizer → Expander → Refiner → Formatter.
+-- Attention as budget allocation.
+-- Pending handler for budget exhaustion.
+-- Budget self-link for accounting.
+--
+-- What this proves about ANWE:
+--   - Attention as resource budget
+--   - FieldAccess tracks running totals
+--   - Pending handler for budget exhaustion
+--   - Self-link as budget accounting process
+--   - Commit as budget checkpoint
+--
+-- BUILDSHEET items covered:
+--   [x] Token budget management (LLM Patterns)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+-- Token budget tracker
+agent Budget attention 0.5 data {
+  total: 4096
+  used: 0
+  remaining: 4096
+  policy: "proportional_allocation"
+}
+
+-- Stage 1: Summarize input (gets 25% budget = 1024 tokens)
+agent Summarizer attention 0.25 external("callback", "summarizer") data {
+  role: "summarizer"
+  allocated_tokens: 1024
+  stage: "1"
+}
+
+-- Stage 2: Expand key points (gets 35% budget = 1434 tokens)
+agent Expander attention 0.35 external("callback", "expander") data {
+  role: "expander"
+  allocated_tokens: 1434
+  stage: "2"
+}
+
+-- Stage 3: Refine language (gets 25% budget = 1024 tokens)
+agent Refiner attention 0.25 external("callback", "refiner") data {
+  role: "refiner"
+  allocated_tokens: 1024
+  stage: "3"
+}
+
+-- Stage 4: Format output (gets 15% budget = 614 tokens)
+agent Formatter attention 0.15 external("callback", "formatter") data {
+  role: "formatter"
+  allocated_tokens: 614
+  stage: "4"
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 2 within 20000 {
+  permanent Summarizer
+  permanent Expander
+  permanent Refiner
+  permanent Formatter
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- STAGE 1: Summarize (budget: 1024 tokens)
+-- ═══════════════════════════════════════════════════════════
+
+link Budget <-> Summarizer priority high {
+  >> { quality: attending, priority: 0.95, confidence: 0.9, half_life: 400 }
+     "Stage 1: Summarizing within 1024-token budget"
+
+  connect depth deep {
+    signal attending   0.9  between data "allocating 25% of budget to summarizer"
+    signal recognizing 0.85 inward  data "tracking token usage"
+  }
+
+  Budget ~ Summarizer until resonating
+
+  <= when confidence <= 0.3 data "summarizer exceeded budget allocation"
+
+  => when sync_level > 0.7 depth deep {
+    stage1_tokens_used <- "890"
+    stage1_tokens_remaining <- "3206"
+    stage1_output <- "Concise summary of input document covering key revenue metrics, growth drivers, and forward guidance."
+    stage1_budget_pct <- "21.7%"
+  }
+
+  * from apply {
+    stage: "summarize"
+    tokens_used: 890
+    budget_remaining: 3206
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- STAGE 2: Expand (budget: 1434 tokens)
+-- ═══════════════════════════════════════════════════════════
+
+link Summarizer <-> Expander priority high {
+  >> { quality: recognizing, priority: 0.9, confidence: 0.85, half_life: 350 }
+     "Stage 2: Expanding key points within 1434-token budget"
+
+  connect depth deep {
+    signal recognizing 0.85 between data Summarizer.stage1_output
+    signal attending   0.8  between data "expanding with detail while respecting budget"
+  }
+
+  Summarizer ~ Expander until resonating
+
+  <= when confidence <= 0.3 data "expander exceeded budget allocation"
+
+  => when sync_level > 0.7 depth deep {
+    stage2_tokens_used <- "1280"
+    stage2_tokens_remaining <- "1926"
+    stage2_output <- "Expanded analysis with detailed breakdowns of each revenue segment, growth trajectory, and competitive positioning."
+    stage2_budget_pct <- "31.3%"
+    stage2_cumulative <- "2170"
+  }
+
+  * from apply {
+    stage: "expand"
+    tokens_used: 1280
+    budget_remaining: 1926
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- STAGE 3: Refine (budget: 1024 tokens)
+-- ═══════════════════════════════════════════════════════════
+
+link Expander <-> Refiner priority normal {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.82, half_life: 300 }
+     "Stage 3: Refining language within 1024-token budget"
+
+  connect depth deep {
+    signal recognizing 0.82 between data Expander.stage2_output
+    signal attending   0.78 between data "tightening prose, improving clarity"
+  }
+
+  Expander ~ Refiner until resonating
+
+  <= when confidence <= 0.3 data "refiner exceeded budget allocation"
+
+  pending? budget_exhausted {
+    guidance "budget running low — switch to compression mode"
+    wait 5 tick
+  }
+
+  => when sync_level > 0.7 depth deep {
+    stage3_tokens_used <- "950"
+    stage3_tokens_remaining <- "976"
+    stage3_output <- "Refined analysis with clear structure, precise language, and actionable insights."
+    stage3_budget_pct <- "23.2%"
+    stage3_cumulative <- "3120"
+  }
+
+  * from apply {
+    stage: "refine"
+    tokens_used: 950
+    budget_remaining: 976
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- STAGE 4: Format (budget: 614 tokens)
+-- ═══════════════════════════════════════════════════════════
+
+link Refiner <-> Formatter priority normal {
+  >> { quality: recognizing, priority: 0.8, confidence: 0.8, half_life: 200 }
+     "Stage 4: Formatting output within 614-token budget"
+
+  connect depth partial {
+    signal recognizing 0.78 between data Refiner.stage3_output
+    signal attending   0.7  between data "applying executive brief format"
+  }
+
+  Refiner ~ Formatter until resonating
+
+  <= when confidence <= 0.3 data "formatter exceeded budget allocation"
+
+  => when sync_level > 0.7 depth partial {
+    stage4_tokens_used <- "580"
+    stage4_tokens_remaining <- "396"
+    stage4_output <- "EXECUTIVE BRIEF: [formatted output with headers, bullet points, and conclusions]"
+    stage4_budget_pct <- "14.2%"
+    stage4_cumulative <- "3700"
+  }
+
+  * from apply {
+    stage: "format"
+    tokens_used: 580
+    budget_remaining: 396
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- BUDGET SELF-LINK: Accounting and summary
+-- ═══════════════════════════════════════════════════════════
+
+link Budget <-> Budget priority background {
+  >> { quality: recognizing, priority: 0.3, confidence: 0.8, half_life: 100 }
+     "Budget accounting: computing final token usage"
+
+  connect depth full {
+    signal recognizing 0.5 inward data "aggregating token usage across all stages"
+  }
+
+  Budget ~ Budget until synchronized
+
+  => when sync_level > 0.3 depth deep {
+    total_budget <- "4096"
+    total_used <- "3700"
+    total_remaining <- "396"
+    utilization <- "90.3%"
+    stage1_usage <- Summarizer.stage1_tokens_used
+    stage2_usage <- Expander.stage2_tokens_used
+    stage3_usage <- Refiner.stage3_tokens_used
+    stage4_usage <- Formatter.stage4_tokens_used
+    budget_summary <- "summarize(890) + expand(1280) + refine(950) + format(580) = 3700/4096"
+  }
+
+  * from apply {
+    stage: "accounting"
+    total_used: 3700
+    total_budget: 4096
+    utilization: "90.3%"
+  }
+}

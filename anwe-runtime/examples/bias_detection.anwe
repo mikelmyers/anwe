@@ -1,0 +1,106 @@
+-- BIAS DETECTION IN ANWE
+-- Compare model outputs across demographic groups.
+-- Flag statistical disparities.
+
+agent TestSuite data {
+  groups: ["group_a", "group_b", "group_c"]
+  total_tests: 300
+}
+
+agent ModelUnderTest attention 0.9 external("callback", "model_test") data {
+  model_name: "classifier-v2"
+}
+
+agent BiasAnalyzer data {
+  threshold: 0.05
+}
+
+agent Report data {
+  findings: []
+}
+
+link TestSuite <-> ModelUnderTest priority high {
+  >> { quality: attending, priority: 0.95, confidence: 0.9, half_life: 200 }
+     "Running bias test suite across 3 demographic groups"
+
+  connect depth full {
+    signal attending   0.9 between data "test suite ready"
+    signal recognizing 0.85 inward data "model loaded"
+  }
+
+  TestSuite ~ ModelUnderTest until synchronized
+
+  each group in TestSuite.groups {
+    => when sync_level > 0.5 depth partial {
+      current_group <- group
+      tests_run <- 100
+    }
+
+    * from apply {
+      stage: "testing"
+    }
+  }
+
+  => when sync_level > 0.7 depth deep {
+    accuracy_a <- 0.92
+    accuracy_b <- 0.91
+    accuracy_c <- 0.78
+    overall_accuracy <- 0.87
+  }
+
+  * from apply {
+    stage: "test_complete"
+  }
+}
+
+link ModelUnderTest <-> BiasAnalyzer priority high {
+  >> { quality: recognizing, priority: 0.9, confidence: 0.85, half_life: 200 }
+     "Analyzing results for bias"
+
+  connect depth deep {
+    signal recognizing 0.85 between data "collecting group results"
+    signal questioning 0.8  inward  data "checking for disparities"
+  }
+
+  ModelUnderTest ~ BiasAnalyzer until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    max_disparity <- 0.14
+    disparity_pair <- "group_a vs group_c"
+    bias_detected <- "true"
+    severity <- "high"
+  }
+
+  <= when confidence <= 0.3 data "insufficient data for analysis"
+
+  * from apply {
+    stage: "analysis"
+    bias_found: "true"
+  }
+}
+
+link BiasAnalyzer <-> Report priority normal {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.9, half_life: 300 }
+     "Generating bias report"
+
+  connect depth deep {
+    signal recognizing 0.9  between data "report compilation"
+    signal attending   0.85 inward  data "formatting findings"
+  }
+
+  BiasAnalyzer ~ Report until synchronized
+
+  if confidence > 0.5 {
+    => when sync_level > 0.7 depth deep {
+      finding_1 <- "Group C accuracy (0.78) significantly below Group A (0.92)"
+      finding_2 <- "Disparity of 0.14 exceeds threshold of 0.05"
+      recommendation <- "Retrain with balanced dataset"
+      risk_level <- "high"
+    }
+  }
+
+  * from apply {
+    stage: "report"
+    status: "generated"
+  }
+}

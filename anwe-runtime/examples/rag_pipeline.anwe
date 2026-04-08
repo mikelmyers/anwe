@@ -1,0 +1,298 @@
+-- ─────────────────────────────────────────────────────────
+-- RAG PIPELINE IN ANWE
+--
+-- Retrieval-Augmented Generation.
+-- Not a Primordia feature. Not an agent demo.
+-- A real AI pipeline written in the language of AI.
+--
+-- What ANWE gives you that Python doesn't:
+--   - Confidence on every retrieved document (Uncertainty)
+--   - Cached results that decay over time (Temporal<T>)
+--   - "LLM not ready" as a valid state, not an error (pending?)
+--   - Context window as a finite attention budget (attention)
+--   - Parallel retrieval with sync points (links + sync)
+--   - Supervision: if embedding fails, restart it (supervise)
+--
+-- Compare this to the Python equivalent in rag_comparison.py.
+-- Same pipeline. Same semantics. Different language.
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- THE PIPELINE COMPONENTS
+-- ═══════════════════════════════════════════════════════════
+
+-- The query. Just data. No special powers.
+agent Query data {
+  text: "What is the attention mechanism in transformer models?"
+  source: "user"
+}
+
+-- Embedding model. External — bridges to a real model.
+-- Attention 0.7: embedding is cheap but not free.
+agent Embedder attention 0.7 external("callback", "embedder") data {
+  model: "all-MiniLM-L6-v2"
+  dimension: 384
+}
+
+-- Vector store. External — bridges to a real database.
+-- Attention 0.9: retrieval is the bottleneck, give it resources.
+agent Store attention 0.9 external("callback", "vectorstore") data {
+  backend: "in-memory"
+  documents: 1000
+}
+
+-- Ranker. Internal — ANWE handles relevance scoring natively.
+-- Attention 0.6: ranking is fast but attention-bounded.
+agent Ranker attention 0.6 data {
+  strategy: "confidence-weighted"
+  max_passages: 5
+}
+
+-- Context assembler. Internal — manages the attention budget.
+-- Attention 0.8: context window is finite, like attention.
+agent Context attention 0.8 data {
+  max_tokens: 4096
+  used_tokens: 0
+}
+
+-- Generator. External — bridges to an LLM.
+-- Attention 1.0: generation gets full resources.
+agent Generator attention 1.0 external("callback", "llm") data {
+  model: "gpt-4"
+  temperature: 0.7
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+--
+-- If the embedding model crashes, restart it.
+-- If the vector store crashes, restart it.
+-- The generator is permanent — never give up on it.
+-- The ranker is transient — restart on failure, not on normal exit.
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 3 within 10000 {
+  permanent Generator
+  permanent Store
+  transient Embedder
+  temporary Ranker
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- STAGE 1: EMBED THE QUERY
+--
+-- The query meets the embedding model.
+-- They sync. The query becomes a vector.
+-- In Python: embedder.encode(query) — one line, no confidence,
+-- no budget awareness, no supervision.
+-- ═══════════════════════════════════════════════════════════
+
+link Query <-> Embedder {
+  -- The query calls attention
+  >> { quality: questioning, priority: 0.9, confidence: 0.95 }
+     "What is the attention mechanism in transformer models?"
+
+  -- Bidirectional presence: query and embedder engage
+  connect depth full {
+    signal questioning 0.9 outward data "encode this query into vector space"
+    signal attending   0.7 between data "model attending to token semantics"
+  }
+
+  -- Find shared rhythm. The embedding model needs to
+  -- actually process the tokens, not just acknowledge receipt.
+  Query ~ Embedder until synchronized
+
+  -- Sync achieved. The query vector crosses the boundary.
+  => when sync_level > 0.6 {
+    query_vector   <- "384-dimensional dense embedding"
+    encoding_model <- "all-MiniLM-L6-v2"
+  }
+
+  -- Committed. The query is now a vector. Irreversible.
+  * from apply {
+    stage: "embedding"
+    status: "complete"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- STAGE 2: RETRIEVE FROM VECTOR STORE
+--
+-- The embedding searches the vector store.
+-- Confidence on every result. Half-life on cached results.
+-- In Python: store.similarity_search(vector, k=10) — returns
+-- a flat list with no confidence, no temporal decay.
+-- ═══════════════════════════════════════════════════════════
+
+link Embedder <-> Store priority high {
+  -- Embedding calls the store's attention
+  >> { quality: questioning, priority: 0.85, confidence: 0.8, half_life: 500 }
+     "find documents similar to this query vector"
+
+  -- Deep connection: similarity search is not shallow
+  connect depth deep {
+    signal questioning  0.9 outward data "cosine similarity search"
+    signal attending    0.8 between data "scanning index"
+    signal recognizing  0.7 inward  data "matching patterns found"
+  }
+
+  -- Sync until the store has actually searched, not just queued
+  Embedder ~ Store until sync_level > 0.7
+
+  -- Results cross the boundary with genuine confidence
+  => when sync_level > 0.7 depth genuine {
+    candidates      <- "10 documents retrieved"
+    top_similarity  <- "0.89 cosine similarity"
+    lowest_relevant <- "0.42 cosine similarity"
+  }
+
+  -- Committed. These are the candidates.
+  * from apply {
+    stage: "retrieval"
+    candidates: 10
+    search_type: "approximate nearest neighbor"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- STAGE 3: RANK AND FILTER
+--
+-- The ranker scores each document against the query.
+-- Attention budget enforces context window limits.
+-- Low-confidence results are rejected — not dropped, rejected.
+-- The ranker KNOWS it rejected them. That's in the history.
+--
+-- In Python: sorted(docs, key=lambda d: d.score)[:5]
+-- No budget. No history. No intelligent withdrawal.
+-- ═══════════════════════════════════════════════════════════
+
+link Ranker <-> Context priority high {
+  -- Ranker announces scored documents
+  >> { quality: recognizing, priority: 0.8, confidence: 0.7, half_life: 200 }
+     "relevance scoring complete — assembling context"
+
+  -- Connect: ranker and context negotiate what fits
+  connect depth full {
+    signal recognizing 0.85 between data "passage relevance scores"
+    signal attending   0.70 between data "attention budget remaining"
+    signal questioning 0.60 inward  data "will this passage fit?"
+  }
+
+  -- Sync: both agree on what makes the cut
+  Ranker ~ Context until synchronized
+
+  -- Only passages above threshold get integrated
+  => when sync_level > 0.6 {
+    ranked_passages <- "top 5 passages by relevance"
+    total_tokens    <- "2847 of 4096 budget used"
+  }
+
+  -- What if the context window is full?
+  -- Not an error. Not a crash. A valid cognitive state.
+  pending? budget_exhausted {
+    wait 0.5 tick
+    guidance "context budget full — drop lowest relevance passage and retry"
+  }
+
+  -- Committed. The context is assembled.
+  * from apply {
+    stage: "ranking"
+    passages_selected: 5
+    passages_rejected: 5
+    budget_remaining: 1249
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- STAGE 4: GENERATE THE ANSWER
+--
+-- The assembled context meets the generator.
+-- This is the critical path — priority critical.
+-- If the LLM isn't ready, that's pending?, not an error.
+-- The answer carries confidence. The history is irreversible.
+--
+-- In Python: llm.generate(prompt=context+query)
+-- No pending state. No confidence. No history.
+-- If the API times out, you get an exception.
+-- ═══════════════════════════════════════════════════════════
+
+link Context <-> Generator priority critical {
+  -- Context calls the generator's full attention
+  >> { quality: attending, priority: 0.95, confidence: 0.85 }
+     "context assembled — ready for generation"
+
+  -- Deep connection: generation requires deep engagement
+  connect depth deep {
+    signal attending    0.95 between data "query plus ranked context"
+    signal questioning  0.80 outward data "generate a grounded answer"
+    signal recognizing  0.70 inward  data "check against retrieved evidence"
+  }
+
+  -- Sync to resonating — generation needs deep alignment
+  Context ~ Generator until resonating
+
+  -- The answer crosses the boundary
+  => when sync_level > 0.8 depth deep {
+    answer     <- "Attention mechanisms allow transformer models to weigh..."
+    sources    <- "3 passages cited with confidence scores"
+    grounding  <- "all claims traceable to retrieved documents"
+  }
+
+  -- Generator not ready? Valid state. Wait.
+  pending? receiver_not_ready {
+    wait 2.0 tick
+    guidance "generator loading or rate-limited — maintain context coherence"
+  }
+
+  -- The answer is committed. Irreversible.
+  -- The pipeline after this is not the pipeline before.
+  * from apply {
+    stage: "generation"
+    answer_tokens: 247
+    citations: 3
+    status: "committed"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- STAGE 5: SELF-REFLECTION (BACKGROUND)
+--
+-- After the answer is committed, the generator reflects.
+-- Was the answer grounded? Did the retrieval miss anything?
+-- This runs at background priority — only when nothing else
+-- needs attention.
+--
+-- In Python: you'd need a separate evaluation pipeline.
+-- Here it's just another link at background priority.
+-- ═══════════════════════════════════════════════════════════
+
+link Generator <-> Generator priority background {
+  >> { quality: questioning, priority: 0.3, confidence: 0.4, half_life: 50 }
+     "was the answer well-grounded in the evidence?"
+
+  connect depth deep {
+    signal questioning 0.5 inward data "check citation accuracy"
+    signal recognizing 0.4 inward data "identify potential hallucination"
+  }
+
+  Generator ~ Generator until synchronized
+
+  when attention > 0.2 {
+    => when sync_level > 0.6 depth deep {
+      self_assessment <- "answer grounding verified"
+      hallucination_risk <- "low — all claims cited"
+    }
+
+    * from apply {
+      stage: "reflection"
+      grounded: true
+    }
+  }
+}

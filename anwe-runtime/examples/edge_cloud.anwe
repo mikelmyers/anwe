@@ -1,0 +1,243 @@
+-- ─────────────────────────────────────────────────────────
+-- EDGE/CLOUD SPLIT IN ANWE
+--
+-- Run perception at the edge, reasoning in the cloud.
+-- Latency-aware scheduling decides what runs where.
+--
+-- Edge agents handle time-critical sensor processing.
+-- Cloud agents handle heavy reasoning and generation.
+-- Bridge connects them transparently.
+--
+-- BUILDSHEET items covered:
+--   [x] Edge/cloud split (Distributed AI)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- EDGE AGENTS (run locally on device)
+-- ═══════════════════════════════════════════════════════════
+
+agent Camera attention 0.7 external("callback", "camera") data {
+  location: "edge"
+  resolution: "1080p"
+  fps: 30
+  latency_budget_ms: 50
+}
+
+agent EdgeDetector attention 0.8 external("callback", "edge_model") data {
+  location: "edge"
+  model: "yolov8-nano"
+  device: "jetson_orin"
+  latency_ms: 15
+  power_watts: 7
+}
+
+agent EdgeBuffer data {
+  location: "edge"
+  capacity: 100
+  current_detections: []
+  priority_queue: []
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- CLOUD AGENTS (run in data center)
+-- ═══════════════════════════════════════════════════════════
+
+agent CloudReasoner attention 0.95 bridge("grpc", "cloud.ai.internal:9090") data {
+  location: "cloud"
+  model: "llm-70b"
+  gpu: "A100"
+  latency_ms: 200
+}
+
+agent CloudAnalytics attention 0.7 bridge("grpc", "cloud.ai.internal:9091") data {
+  location: "cloud"
+  storage: "s3"
+  retention_days: 90
+}
+
+agent ActionController attention 0.9 data {
+  location: "edge"
+  actions_available: ["alert", "record", "track", "ignore"]
+  latency_budget_ms: 100
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- ROUTING — what runs where
+-- ═══════════════════════════════════════════════════════════
+
+agent LocationRouter attention 0.9 data {
+  edge_threshold_ms: 50
+  cloud_threshold_ms: 5000
+  current_bandwidth_mbps: 100
+  current_latency_ms: 25
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 5 within 30000 {
+  EdgeDetector
+  EdgeBuffer
+  ActionController
+  LocationRouter
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LINKS
+-- ═══════════════════════════════════════════════════════════
+
+-- Edge: real-time object detection (must be fast)
+link Camera <-> EdgeDetector priority critical continuous {
+  >> { quality: attending, priority: 0.95, confidence: 0.9, half_life: 30 }
+     "Edge: real-time detection (< 50ms budget)"
+
+  connect depth full {
+    signal attending 0.9 between data "frame analysis"
+  }
+
+  Camera ~ EdgeDetector until synchronized
+
+  stream Camera rate 30 {
+    => when sync_level > 0.5 depth deep {
+      detections <- ["person:0.92", "car:0.88", "bicycle:0.75"]
+      inference_ms <- 15
+      within_budget <- "true"
+    }
+
+    if EdgeDetector.latency_ms > 50 {
+      <= when confidence <= 0.3 data "frame dropped — latency budget exceeded"
+    }
+  }
+
+  * from apply {
+    stage: "edge_detection"
+    location: "edge"
+    latency_ms: 15
+  }
+}
+
+-- Edge: priority filtering before sending to cloud
+link EdgeDetector <-> EdgeBuffer priority high {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.85, half_life: 50 }
+     "Edge: filtering detections for cloud analysis"
+
+  connect depth full {
+    signal recognizing 0.85 between data "priority classification"
+  }
+
+  EdgeDetector ~ EdgeBuffer until synchronized
+
+  -- Only send interesting detections to cloud (save bandwidth)
+  if confidence > 0.8 {
+    => when sync_level > 0.6 depth deep {
+      forwarded_to_cloud <- "true"
+      detection <- "person:0.92"
+      reason <- "high confidence detection needs scene understanding"
+    }
+  } else {
+    => when sync_level > 0.5 depth partial {
+      forwarded_to_cloud <- "false"
+      handled_locally <- "true"
+      action <- "log_only"
+    }
+  }
+
+  * from apply {
+    stage: "edge_filter"
+    location: "edge"
+  }
+}
+
+-- Edge→Cloud: send high-priority detections for reasoning
+link EdgeBuffer <-> CloudReasoner priority high {
+  >> { quality: questioning, priority: 0.9, confidence: 0.85, half_life: 200 }
+     "Edge→Cloud: sending detection for scene understanding"
+
+  connect depth deep {
+    signal questioning 0.85 between data "what is happening in this scene"
+    signal attending   0.8  inward  data "contextual analysis"
+  }
+
+  EdgeBuffer ~ CloudReasoner until synchronized timeout 2000 {
+    on_timeout: pending
+  }
+
+  => when sync_level > 0.7 depth deep {
+    scene_understanding <- "Person approaching building entrance, normal walking speed, no anomaly indicators"
+    reasoning_confidence <- 0.88
+    context <- "business hours, expected traffic pattern"
+    recommended_action <- "log"
+    cloud_latency_ms <- 180
+  }
+
+  * from apply {
+    stage: "cloud_reasoning"
+    location: "cloud"
+    latency_ms: 180
+  }
+}
+
+-- Cloud→Edge: action based on reasoning
+link CloudReasoner <-> ActionController priority high {
+  >> { quality: applying, priority: 0.9, confidence: 0.85, half_life: 100 }
+     "Cloud→Edge: action command based on reasoning"
+
+  connect depth full {
+    signal applying    0.85 between data "action decision"
+    signal recognizing 0.8  inward  data "executing at edge"
+  }
+
+  CloudReasoner ~ ActionController until synchronized
+
+  if CloudReasoner.reasoning_confidence > 0.7 {
+    => when sync_level > 0.6 depth deep {
+      action <- "log"
+      reason <- "normal activity"
+      total_pipeline_ms <- 213
+      edge_ms <- 15
+      network_ms <- 18
+      cloud_ms <- 180
+    }
+  } else {
+    => when sync_level > 0.6 depth deep {
+      action <- "alert"
+      reason <- "uncertain scene — human review"
+    }
+  }
+
+  * from apply {
+    stage: "action"
+    location: "edge"
+    total_latency: 213
+  }
+}
+
+-- Cloud: background analytics
+link CloudReasoner <-> CloudAnalytics priority low {
+  >> { quality: completing, priority: 0.5, confidence: 0.9, half_life: 500 }
+     "Cloud: storing detection + reasoning for analytics"
+
+  connect depth partial {
+    signal completing 0.5 between data "analytics ingestion"
+  }
+
+  CloudReasoner ~ CloudAnalytics until synchronized
+
+  => when sync_level > 0.4 depth partial {
+    stored_event <- "person_detection_normal"
+    stored_reasoning <- "normal traffic pattern"
+    retention <- "90 days"
+    aggregation <- "daily_pattern_update"
+  }
+
+  * from apply {
+    stage: "analytics"
+    location: "cloud"
+  }
+}

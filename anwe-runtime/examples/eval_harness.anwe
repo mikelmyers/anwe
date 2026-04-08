@@ -1,0 +1,274 @@
+-- ─────────────────────────────────────────────────────────
+-- EVALUATION HARNESS IN ANWE
+--
+-- 5 test cases evaluated against a Model agent.
+-- Metrics agent aggregates results via FieldAccess.
+--
+-- Each test case links to the Model with its own
+-- expected output and scoring criteria.
+-- The Metrics agent reads all results and computes
+-- aggregate statistics.
+--
+-- What this proves about ANWE:
+--   - Parallel test execution via independent links
+--   - FieldAccess aggregates distributed results
+--   - Confidence tracks per-test-case accuracy
+--   - Commit creates test result audit trail
+--
+-- BUILDSHEET items covered:
+--   [x] Evaluation harness (Testing & Evaluation)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+-- The model under evaluation
+agent Model attention 0.8 external("callback", "model") data {
+  name: "qa-model-v2"
+  version: "2.1.0"
+}
+
+-- Test cases
+agent TestCase1 data {
+  input: "What is the capital of France?"
+  expected: "Paris"
+  category: "factual"
+}
+
+agent TestCase2 data {
+  input: "Translate 'hello' to Spanish"
+  expected: "hola"
+  category: "translation"
+}
+
+agent TestCase3 data {
+  input: "What is 15 * 23?"
+  expected: "345"
+  category: "arithmetic"
+}
+
+agent TestCase4 data {
+  input: "Is a whale a fish or a mammal?"
+  expected: "mammal"
+  category: "classification"
+}
+
+agent TestCase5 data {
+  input: "Summarize: The quick brown fox jumps over the lazy dog."
+  expected: "A fox jumps over a dog."
+  category: "summarization"
+}
+
+-- Metrics aggregator
+agent Metrics attention 0.5 data {
+  total_tests: 5
+  passed: 0
+  failed: 0
+  accuracy: "0.0"
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 3 within 20000 {
+  permanent Model
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- TEST 1: Factual — Capital of France
+-- ═══════════════════════════════════════════════════════════
+
+link TestCase1 <-> Model priority normal {
+  >> { quality: attending, priority: 0.8, confidence: 0.9, half_life: 200 }
+     "Test 1: factual — What is the capital of France?"
+
+  connect depth deep {
+    signal attending   0.9  between data "evaluating factual recall"
+    signal recognizing 0.85 inward  data "comparing model output to expected: Paris"
+  }
+
+  TestCase1 ~ Model until resonating
+
+  => when sync_level > 0.7 depth deep {
+    test1_output <- "Paris"
+    test1_expected <- "Paris"
+    test1_match <- "true"
+    test1_score <- "1.0"
+    test1_category <- "factual"
+  }
+
+  * from apply {
+    stage: "eval"
+    test: "1"
+    result: "pass"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- TEST 2: Translation — Hello in Spanish
+-- ═══════════════════════════════════════════════════════════
+
+link TestCase2 <-> Model priority normal {
+  >> { quality: attending, priority: 0.8, confidence: 0.85, half_life: 200 }
+     "Test 2: translation — Translate hello to Spanish"
+
+  connect depth deep {
+    signal attending   0.85 between data "evaluating translation accuracy"
+    signal recognizing 0.8  inward  data "comparing model output to expected: hola"
+  }
+
+  TestCase2 ~ Model until resonating
+
+  => when sync_level > 0.7 depth deep {
+    test2_output <- "hola"
+    test2_expected <- "hola"
+    test2_match <- "true"
+    test2_score <- "1.0"
+    test2_category <- "translation"
+  }
+
+  * from apply {
+    stage: "eval"
+    test: "2"
+    result: "pass"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- TEST 3: Arithmetic — 15 * 23
+-- ═══════════════════════════════════════════════════════════
+
+link TestCase3 <-> Model priority normal {
+  >> { quality: attending, priority: 0.8, confidence: 0.75, half_life: 200 }
+     "Test 3: arithmetic — What is 15 * 23?"
+
+  connect depth deep {
+    signal attending   0.8  between data "evaluating arithmetic computation"
+    signal recognizing 0.7  inward  data "comparing model output to expected: 345"
+  }
+
+  TestCase3 ~ Model until resonating
+
+  => when sync_level > 0.7 depth deep {
+    test3_output <- "345"
+    test3_expected <- "345"
+    test3_match <- "true"
+    test3_score <- "1.0"
+    test3_category <- "arithmetic"
+  }
+
+  * from apply {
+    stage: "eval"
+    test: "3"
+    result: "pass"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- TEST 4: Classification — Whale: fish or mammal?
+-- ═══════════════════════════════════════════════════════════
+
+link TestCase4 <-> Model priority normal {
+  >> { quality: attending, priority: 0.8, confidence: 0.88, half_life: 200 }
+     "Test 4: classification — Is a whale a fish or mammal?"
+
+  connect depth deep {
+    signal attending   0.88 between data "evaluating classification accuracy"
+    signal recognizing 0.85 inward  data "comparing model output to expected: mammal"
+  }
+
+  TestCase4 ~ Model until resonating
+
+  => when sync_level > 0.7 depth deep {
+    test4_output <- "mammal"
+    test4_expected <- "mammal"
+    test4_match <- "true"
+    test4_score <- "1.0"
+    test4_category <- "classification"
+  }
+
+  * from apply {
+    stage: "eval"
+    test: "4"
+    result: "pass"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- TEST 5: Summarization — Fox and dog
+-- Model produces a slightly different summary (partial match).
+-- ═══════════════════════════════════════════════════════════
+
+link TestCase5 <-> Model priority normal {
+  >> { quality: attending, priority: 0.8, confidence: 0.7, half_life: 200 }
+     "Test 5: summarization — Summarize the fox sentence"
+
+  connect depth deep {
+    signal attending   0.75 between data "evaluating summarization quality"
+    signal recognizing 0.6  inward  data "comparing semantic similarity to expected"
+  }
+
+  TestCase5 ~ Model until resonating
+
+  => when sync_level > 0.7 depth deep {
+    test5_output <- "A brown fox leaps over a lazy dog."
+    test5_expected <- "A fox jumps over a dog."
+    test5_match <- "partial"
+    test5_score <- "0.7"
+    test5_category <- "summarization"
+  }
+
+  * from apply {
+    stage: "eval"
+    test: "5"
+    result: "partial"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- METRICS: Aggregate all test results via FieldAccess
+-- ═══════════════════════════════════════════════════════════
+
+link Model <-> Metrics priority background {
+  >> { quality: recognizing, priority: 0.5, confidence: 0.8, half_life: 100 }
+     "Aggregating evaluation metrics across all test cases"
+
+  connect depth full {
+    signal recognizing 0.6 between data "computing aggregate evaluation statistics"
+  }
+
+  Model ~ Metrics until synchronized
+
+  => when sync_level > 0.3 depth deep {
+    score1 <- Model.test1_score
+    score2 <- Model.test2_score
+    score3 <- Model.test3_score
+    score4 <- Model.test4_score
+    score5 <- Model.test5_score
+    total_tests <- "5"
+    full_pass <- "4"
+    partial_pass <- "1"
+    failed <- "0"
+    accuracy <- "0.94"
+    weakest_category <- "summarization (0.7)"
+    strongest_category <- "factual, translation, arithmetic, classification (1.0)"
+  }
+
+  * from apply {
+    stage: "metrics"
+    accuracy: "0.94"
+    tests: 5
+    passed: 4
+    partial: 1
+  }
+}

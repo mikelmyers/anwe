@@ -1,0 +1,269 @@
+-- ═══════════════════════════════════════════════════════════
+-- ai_coordinator_v06.anwe — Pure .anwe AI Coordinator
+-- Demonstrates ANWE v0.6: "Make It Real"
+--
+-- This is a COMPLETE AI coordination pipeline written
+-- entirely in .anwe. No Rust. No Python. Just ANWE.
+--
+-- Features used:
+--   Phase 1: Block expressions (multi-statement fn bodies)
+--   Phase 2: Operators (!=, not, and, or)
+--   Phase 3: If/else expressions (anywhere)
+--   Phase 4: String interpolation (f-strings)
+--   Phase 5: HTTP + JSON builtins
+--   Phase 6: Agents, links, signals, supervision
+-- ═══════════════════════════════════════════════════════════
+
+-- ─── CONFIGURATION ──────────────────────────────────────
+-- All config is pure .anwe data — editable without recompile
+
+let api_url = "https://api.anthropic.com/v1/messages"
+let model_name = "claude-sonnet-4-20250514"
+let max_tokens = 1024
+let temperature = 0.7
+
+-- ─── UTILITY FUNCTIONS ──────────────────────────────────
+-- Multi-statement function bodies (Phase 1)
+-- Operators and if/else (Phases 2-3)
+
+fn build_api_headers(api_key) {
+    let auth = f"Bearer {api_key}";
+    json_parse(json_stringify([
+        ["x-api-key", api_key],
+        ["anthropic-version", "2023-06-01"],
+        ["content-type", "application/json"]
+    ]))
+}
+
+fn build_message_body(prompt, system_prompt) {
+    let messages = [
+        json_parse(json_stringify(json_parse(f"{{\"role\": \"user\", \"content\": \"{prompt}\"}}")))
+    ];
+    let body = json_parse(f"{{\"model\": \"{model_name}\", \"max_tokens\": {max_tokens}}}");
+    json_stringify(body)
+}
+
+fn classify_response(status) {
+    if status == 200 { "success" }
+    else { if status >= 400 and status < 500 { "client_error" }
+    else { if status >= 500 { "server_error" }
+    else { "unknown" } } }
+}
+
+fn is_retriable(status) {
+    (status == 429) or (status >= 500)
+}
+
+fn extract_text(response_body) {
+    let parsed = json_parse(response_body);
+    let content = parsed.content;
+    if content != null { "response received" } else { "no content" }
+}
+
+fn should_escalate(error_count, threshold) {
+    error_count >= threshold
+}
+
+fn build_status_report(agent_name, status, detail) {
+    let report = f"[{agent_name}] status={status} detail={detail}";
+    report
+}
+
+fn validate_input(text) {
+    let trimmed = trim(text);
+    let is_empty = len(trimmed) == 0;
+    let is_too_long = len(trimmed) > 10000;
+    if is_empty { "error: empty input" }
+    else { if is_too_long { "error: input too long" }
+    else { "valid" } }
+}
+
+fn format_error(source, message) {
+    f"ERROR [{source}]: {message}"
+}
+
+fn log_event(level, source, message) {
+    let timestamp_val = timestamp();
+    let entry = f"[{level}] {source}: {message} (t={timestamp_val})";
+    print(entry)
+}
+
+-- ─── DATA RECORDS ───────────────────────────────────────
+-- Structured types for the pipeline
+
+record Request { id, prompt, system_prompt, priority }
+record Response { id, status, body, latency }
+record AgentStatus { name, state, error_count, last_error }
+
+-- ─── AGENTS ─────────────────────────────────────────────
+-- Four-stage pipeline: Input → Process → API → Output
+
+agent InputAgent data {
+    raw_input: "none"
+    validated: false
+    error_count: 0
+}
+
+agent ProcessAgent data {
+    prompt: "none"
+    system_prompt: "You are a helpful AI assistant."
+    prepared: false
+    request_id: 0
+}
+
+agent APIAgent data {
+    status: "idle"
+    last_response: "none"
+    error_count: 0
+    total_calls: 0
+}
+
+agent OutputAgent data {
+    result: "none"
+    format: "text"
+    delivered: false
+}
+
+-- Monitoring agent watches the pipeline health
+agent Monitor data {
+    pipeline_healthy: true
+    alert_count: 0
+    last_check: "none"
+}
+
+-- ─── SUPERVISION ────────────────────────────────────────
+-- If any agent crashes, restart it. Monitor is transient.
+
+supervise one_for_one max_restarts 5 within 10000 {
+    permanent InputAgent
+    permanent ProcessAgent
+    permanent APIAgent
+    permanent OutputAgent
+    transient Monitor
+}
+
+-- ─── FUNCTIONS FOR PIPELINE STAGES ──────────────────────
+-- Each stage processes data using v0.6 features
+
+fn process_input(raw) {
+    let validation = validate_input(raw);
+    let is_valid = validation == "valid";
+    if is_valid {
+        let cleaned = trim(raw);
+        let word_count = len(split(cleaned, " "));
+        let summary = f"Input: {word_count} words, validated";
+        summary
+    } else {
+        format_error("input", validation)
+    }
+}
+
+fn prepare_request(prompt, sys_prompt) {
+    let body = build_message_body(prompt, sys_prompt);
+    let request_info = f"Request prepared: model={model_name} tokens={max_tokens}";
+    request_info
+}
+
+fn handle_api_response(status, body) {
+    let classification = classify_response(status);
+    let retriable = is_retriable(status);
+    if classification == "success" {
+        let text = extract_text(body);
+        f"API success: {text}"
+    } else {
+        if retriable {
+            f"API error (retriable): status={status}"
+        } else {
+            f"API error (fatal): status={status}"
+        }
+    }
+}
+
+fn format_output(result, output_format) {
+    if output_format == "json" {
+        json_stringify(json_parse(f"{{\"result\": \"{result}\"}}"))
+    } else {
+        result
+    }
+}
+
+-- ─── PIPELINE LINKS ─────────────────────────────────────
+-- Data flows through the four-stage pipeline
+
+-- Stage 1: Input validation
+link InputAgent <-> ProcessAgent {
+    >> "input received"
+    connect depth full {
+        signal attending 0.9 outward
+    }
+    InputAgent ~ ProcessAgent until synchronized
+    think {
+        input_status <- process_input("Hello, can you help me understand ANWE?")
+    }
+    => when sync_level > 0.5 depth full {
+        validated <- true
+    }
+    * from apply { source: "input_pipeline" }
+}
+
+-- Stage 2: Request preparation
+link ProcessAgent <-> APIAgent {
+    >> "processing request"
+    connect depth deep {
+        signal recognizing 0.8 between
+    }
+    ProcessAgent ~ APIAgent until synchronized
+    think {
+        request_info <- prepare_request("Hello world", "You are helpful.")
+    }
+    => when sync_level > 0.5 depth deep {
+        prepared <- true
+        status <- "requesting"
+    }
+    * from apply { source: "process_pipeline" }
+}
+
+-- Stage 3: API response handling
+link APIAgent <-> OutputAgent {
+    >> "api call complete"
+    connect depth full {
+        signal completing 0.9 outward
+    }
+    APIAgent ~ OutputAgent until synchronized
+    think {
+        response_summary <- handle_api_response(200, "{}")
+    }
+    => when sync_level > 0.5 depth full {
+        result <- "delivered"
+        delivered <- true
+    }
+    * from apply { source: "api_pipeline" }
+}
+
+-- Stage 4: Health monitoring with error recovery
+link Monitor <-> InputAgent {
+    >> "health check"
+    attempt {
+        Monitor ~ InputAgent until synchronized
+        think {
+            health <- build_status_report("pipeline", "healthy", "all stages ok")
+        }
+        => when sync_level > 0.3 {
+            last_check <- "completed"
+        }
+    } recover {
+        >> "monitor recovery"
+        think {
+            alert_count <- 1
+        }
+    }
+    * from apply { source: "monitoring" }
+}
+
+-- Periodic heartbeat: pipeline liveness check
+link Monitor <-> OutputAgent every 5 ticks {
+    >> "heartbeat"
+    think {
+        status <- build_status_report("heartbeat", "alive", f"monitor active")
+    }
+}

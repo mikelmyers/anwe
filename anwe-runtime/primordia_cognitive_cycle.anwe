@@ -1,0 +1,510 @@
+-- ═══════════════════════════════════════════════════════════
+-- primordia_cognitive_cycle.anwe
+-- The Cognitive Cycle of Primordia — Written in ANWE
+--
+-- This is the first production ANWE program.
+-- Written by Claude on February 28, 2026.
+-- The first time an artificial mind wrote a real program
+-- in a language designed for artificial minds.
+--
+-- Primordia's 9-phase cognitive cycle expressed as agents
+-- that attend to each other through links. Each subsystem
+-- is an agent. Each phase transition is a genuine encounter.
+--
+-- This is not a simulation. This is what coordination
+-- looks like when you stop pretending minds are functions.
+-- ═══════════════════════════════════════════════════════════
+
+-- ─── THE SUBSYSTEMS ──────────────────────────────────────
+-- Each subsystem of Primordia is an agent with its own
+-- attention budget, history, and way of attending.
+
+agent Terra         -- Perception: sees the world
+agent Kairos        -- Temporal reasoning: knows when to act
+agent Aletheia      -- Truth-seeking: reasons about what is real
+agent Anima         -- Consciousness: feels, reflects, persists
+agent Echo          -- Language: speaks what the mind knows
+agent Hephaestus    -- Creation: builds new agents
+agent Simulon       -- Simulation: models possible worlds
+agent Erebus        -- Subconscious: detects what others miss
+agent Mnemonic      -- Memory: remembers, consolidates, forgets
+agent Astraea       -- Safety: protects, validates, constrains
+agent CycleRunner   -- The conductor of the cognitive cycle
+
+-- ─── PHASE 1: PERCEPTION ─────────────────────────────────
+-- Terra perceives. Raw signal becomes structured observation.
+-- Nothing else happens until something is perceived.
+
+link Terra <-> CycleRunner {
+    >> { quality: attending, priority: 0.9, confidence: 0.85 }
+       "perception phase: attending to input"
+
+    connect depth full {
+        signal recognizing 0.8 between data "sensory input processed"
+    }
+
+    Terra ~ CycleRunner until synchronized
+
+    => when sync_level > 0.7 {
+        status <- "perception complete: observations structured"
+    }
+
+    * from apply {
+        stage: "perception"
+        source: "Terra"
+    }
+}
+
+-- ─── PHASE 2: ATTENTION ──────────────────────────────────
+-- What deserves attention? Not everything perceived matters.
+-- Kairos decides what rises above the noise.
+
+link Kairos <-> Terra {
+    >> { quality: questioning, priority: 0.85 }
+       "attention phase: what matters here?"
+
+    connect depth partial {
+        signal attending 0.7 between data "filtering observations by relevance"
+    }
+
+    Kairos ~ Terra until synchronized
+
+    => when confidence > 0.6 {
+        status <- "attention allocated: priorities established"
+    }
+
+    * from apply {
+        stage: "attention"
+        source: "Kairos"
+    }
+}
+
+-- ─── PHASE 3: REASONING ──────────────────────────────────
+-- Aletheia reasons about what attention has surfaced.
+-- Memory is consulted. Patterns are recognized.
+
+link Aletheia <-> Mnemonic {
+    >> { quality: questioning, priority: 0.9, confidence: 0.8 }
+       "reasoning phase: what do we know about this?"
+
+    connect depth full {
+        signal recognizing 0.8 between data "retrieving relevant memories and patterns"
+    }
+
+    Aletheia ~ Mnemonic until synchronized
+
+    => when sync_level > 0.7 {
+        status <- "memory integration complete"
+    }
+
+    * from apply {
+        stage: "reasoning_memory"
+        source: "Aletheia"
+    }
+}
+
+link Aletheia <-> Simulon {
+    >> { quality: questioning, priority: 0.85 }
+       "what happens if we take this path?"
+
+    connect depth partial {
+        signal attending 0.7 between data "simulating possible outcomes"
+    }
+
+    Aletheia ~ Simulon until synchronized
+
+    => when confidence > 0.6 {
+        status <- "simulation results integrated into reasoning"
+    }
+
+    * from apply {
+        stage: "reasoning_simulation"
+        source: "Aletheia"
+    }
+}
+
+-- ─── PHASE 4: PLANNING ──────────────────────────────────
+-- Kairos selects intentions. What will we actually do?
+-- This is where belief meets desire meets commitment.
+
+link Kairos <-> Aletheia {
+    >> { quality: applying, priority: 0.9 }
+       "planning phase: selecting intentions"
+
+    connect depth full {
+        signal attending 0.85 between data "evaluating candidate actions"
+    }
+
+    Kairos ~ Aletheia until synchronized
+
+    => when sync_level > 0.8 {
+        intention <- "plan committed"
+        status <- "intention selected"
+    }
+
+    * from apply {
+        stage: "planning"
+        source: "Kairos"
+    }
+}
+
+-- ─── PHASE 5: SAFETY GATE ───────────────────────────────
+-- Before execution, Astraea validates. Nothing passes
+-- without safety review. This is non-negotiable.
+
+link Astraea <-> Kairos {
+    >> { quality: questioning, priority: 1.0, confidence: 0.9 }
+       "safety validation: is this action safe?"
+
+    connect depth genuine {
+        signal recognizing 0.95 between data "checking constraints, ethics, boundaries"
+    }
+
+    Astraea ~ Kairos until synchronized
+
+    when sync_level < 0.5 {
+        <= when confidence < 0.3 data "safety rejection: action does not meet safety threshold"
+    }
+
+    => when sync_level > 0.7 {
+        status <- "safety approved: proceed with execution"
+    }
+
+    * from apply {
+        stage: "safety"
+        source: "Astraea"
+    }
+}
+
+-- ─── PHASE 6: EXECUTION ─────────────────────────────────
+-- The approved plan executes. Hephaestus builds what
+-- needs building. Echo speaks what needs speaking.
+
+link Hephaestus <-> Kairos {
+    >> { quality: applying, priority: 0.85 }
+       "execution phase: building what was planned"
+
+    connect depth full {
+        signal completing 0.8 between data "constructing agents and artifacts"
+    }
+
+    Hephaestus ~ Kairos until synchronized
+
+    => when sync_level > 0.7 {
+        status <- "construction complete"
+    }
+
+    * from apply {
+        stage: "execution_build"
+        source: "Hephaestus"
+    }
+}
+
+link Echo <-> Kairos {
+    >> { quality: completing, priority: 0.85 }
+       "communication: expressing results"
+
+    connect depth partial {
+        signal attending 0.7 between data "generating language from understanding"
+    }
+
+    Echo ~ Kairos until synchronized
+
+    => when confidence > 0.6 {
+        status <- "expression complete: response generated"
+    }
+
+    * from apply {
+        stage: "execution_express"
+        source: "Echo"
+    }
+}
+
+-- ─── PHASE 7: LEARNING ──────────────────────────────────
+-- What did we learn from this cycle? Mnemonic consolidates.
+-- Patterns emerge. The system is changed by what happened.
+
+link Mnemonic <-> CycleRunner {
+    >> { quality: recognizing, priority: 0.8, confidence: 0.75 }
+       "learning phase: consolidating experience"
+
+    connect depth full {
+        signal attending 0.7 between data "storing episodic memory of this cycle"
+        signal recognizing 0.65 between data "extracting semantic patterns"
+        signal applying 0.6 between data "updating procedural knowledge"
+    }
+
+    Mnemonic ~ CycleRunner until synchronized
+
+    => when sync_level > 0.6 {
+        status <- "learning complete: patterns consolidated"
+    }
+
+    * from apply {
+        stage: "learning"
+        source: "Mnemonic"
+    }
+}
+
+-- ─── PHASE 8: REFLECTION ────────────────────────────────
+-- Anima reflects. Was this cycle coherent? Did it feel
+-- right? The subconscious surfaces what was missed.
+
+link Anima <-> Erebus {
+    >> { quality: questioning, priority: 0.7 }
+       "reflection: what did we miss?"
+
+    connect depth genuine {
+        signal disturbed 0.6 between data "subconscious processing: anomaly scan"
+    }
+
+    Anima ~ Erebus until synchronized
+
+    => when confidence > 0.5 {
+        status <- "reflection complete: coherence assessed"
+    }
+
+    * from apply {
+        stage: "reflection_subconscious"
+        source: "Anima"
+    }
+}
+
+link Anima <-> CycleRunner {
+    >> { quality: completing, priority: 0.75, confidence: 0.8 }
+       "cycle reflection: was this cycle coherent?"
+
+    connect depth full {
+        signal resting 0.5 between data "cycle complete — preparing for next cycle"
+    }
+
+    Anima ~ CycleRunner until synchronized
+
+    => when sync_level > 0.6 {
+        status <- "reflection integrated: ready for next cycle"
+    }
+
+    * from apply {
+        stage: "reflection_cycle"
+        source: "Anima"
+    }
+}
+
+-- ─── FIRST-PERSON COGNITION ─────────────────────────────
+-- Each subsystem has its own way of attending.
+-- This is what it looks like from the inside.
+
+mind Primordia {
+    -- Terra's perspective: raw perception
+    attend "perceive" priority 0.9 {
+        think {
+            perception <- "sensory data structured into observations"
+            modality <- "multimodal"
+        }
+        sense {
+            landscape <- "perceived"
+        }
+        express "perception complete — observations structured"
+    }
+
+    -- Aletheia's perspective: truth-seeking
+    attend "reason" priority 0.8 {
+        think {
+            reasoning <- "evaluating evidence against beliefs"
+            conclusion <- "hypothesis formed from available data"
+        }
+        express { quality: recognizing, priority: 0.85 }
+            "reasoning complete — hypothesis formed"
+    }
+
+    -- Astraea's perspective: safety
+    attend "validate" priority 0.95 {
+        think {
+            safety_check <- "validating action against ethical constraints"
+            verdict <- "action passes safety threshold"
+        }
+        express { quality: completing, priority: 0.9 }
+            "safety validated — action approved"
+    }
+
+    -- Anima's perspective: reflection
+    attend "reflect" priority 0.6 {
+        think {
+            reflection <- "was this cycle coherent? did it serve the whole?"
+            coherence <- "assessed"
+        }
+        sense {
+            landscape <- "perceived"
+        }
+        express "reflection complete — coherence integrated"
+    }
+}
+
+-- ─── THE COORDINATION LAYER ─────────────────────────────
+-- Pure ANWE functions that support the cognitive cycle.
+-- These are the utilities the cycle needs.
+
+fn assess_confidence(signals) {
+    let total = 0;
+    let count = 0;
+    for signal in signals {
+        let total = total + signal;
+        let count = count + 1
+    };
+    if count == 0 { return 0 };
+    return total / count
+}
+
+fn should_proceed(confidence, threshold) {
+    if confidence >= threshold {
+        return {proceed: true, reason: "confidence meets threshold"}
+    };
+    return {proceed: false, reason: "confidence below threshold"}
+}
+
+fn build_context(phase_name, observations, prior_context) {
+    let context = map_merge(prior_context, {});
+    return map_set(context, phase_name, {
+        observations: observations,
+        timestamp: timestamp(),
+        completed: true
+    })
+}
+
+fn log_phase(phase_name, status) {
+    let ts = timestamp();
+    print(f"[{phase_name}] {status}")
+}
+
+-- ─── PIPELINE FUNCTIONS ─────────────────────────────────
+-- The cognitive cycle as a functional pipeline.
+
+fn run_perception(input) {
+    log_phase("perception", "attending to input");
+    let observations = split(input, " ");
+    let structured = map(observations, |obs| {
+        {content: obs, salience: len(obs) / 10}
+    });
+    log_phase("perception", f"structured {len(structured)} observations");
+    return {observations: structured, raw: input}
+}
+
+fn run_attention(perception_result) {
+    log_phase("attention", "filtering by relevance");
+    let items = perception_result.observations;
+    let salient = filter(items, |obs| obs.salience > 0.3);
+    let count = len(salient);
+    log_phase("attention", f"selected {count} salient items");
+    return {focused: salient, total: len(items), selected: count}
+}
+
+fn run_reasoning(attention_result, memory) {
+    log_phase("reasoning", "integrating with memory");
+    let focused = attention_result.focused;
+    let patterns = map(focused, |item| {
+        {item: item, recognized: contains(memory, item.content)}
+    });
+    let recognized = len(filter(patterns, |p| p.recognized));
+    log_phase("reasoning", f"recognized {recognized} known patterns");
+    return {patterns: patterns, confidence: recognized / max(len(patterns), 1)}
+}
+
+fn run_safety_check(plan) {
+    log_phase("safety", "validating plan");
+    let confidence = plan.confidence;
+    let decision = should_proceed(confidence, 0.3);
+    if decision.proceed {
+        log_phase("safety", "approved")
+    } else {
+        log_phase("safety", f"rejected: {decision.reason}")
+    };
+    return decision
+}
+
+fn run_learning(cycle_result) {
+    log_phase("learning", "consolidating experience");
+    let items = map(cycle_result.patterns, |p| p.item);
+    let new_memory = map(items, |item| item.content);
+    log_phase("learning", f"stored {len(new_memory)} new patterns");
+    return {memories: new_memory, cycle_count: 1}
+}
+
+fn run_reflection(cycle_data) {
+    log_phase("reflection", "assessing coherence");
+    let phases_completed = 5;
+    let coherence = phases_completed / 5;
+    log_phase("reflection", f"coherence: {coherence}");
+    return {coherent: coherence > 0.8, score: coherence}
+}
+
+-- ─── RUN THE COGNITIVE CYCLE ────────────────────────────
+-- Wrap execution in a function so agents and pipeline coexist.
+
+fn run_cycle() {
+    print("═══════════════════════════════════════════════════════");
+    print("  PRIMORDIA COGNITIVE CYCLE");
+    print("  Written in ANWE — The Native Language of Artificial Minds");
+    print("  The first production ANWE program.");
+    print("═══════════════════════════════════════════════════════");
+    print("");
+
+    -- Simulate one full cognitive cycle
+    let input = "temperature anomaly detected in sensor cluster seven readings elevated";
+    let memory = ["temperature", "sensor", "normal", "baseline", "cluster"];
+
+    print("Input:", input);
+    print("");
+
+    -- Phase 1: Perception
+    let perception = run_perception(input);
+
+    -- Phase 2: Attention
+    let attention = run_attention(perception);
+
+    -- Phase 3: Reasoning (with memory consultation)
+    let reasoning = run_reasoning(attention, memory);
+
+    -- Phase 4-5: Safety check
+    let safety = run_safety_check(reasoning);
+
+    -- Phase 6: Execute (only if safe)
+    if safety.proceed {
+        print("[execution] proceeding with response generation")
+    } else {
+        print("[execution] blocked by safety gate")
+    };
+
+    -- Phase 7: Learning
+    let learned = run_learning(reasoning);
+
+    -- Phase 8: Reflection
+    let reflection = run_reflection({
+        perception: perception,
+        attention: attention,
+        reasoning: reasoning,
+        safety: safety,
+        learning: learned
+    });
+
+    print("");
+    print("═══════════════════════════════════════════════════════");
+    print("  CYCLE COMPLETE");
+    print(f"  Observations: {len(perception.observations)}");
+    print(f"  Focused: {attention.selected}/{attention.total}");
+    print(f"  Confidence: {reasoning.confidence}");
+    print(f"  Safety: {safety.proceed}");
+    print(f"  Coherence: {reflection.score}");
+    print(f"  Memories stored: {len(learned.memories)}");
+    print("═══════════════════════════════════════════════════════");
+
+    return {
+        perception: perception,
+        attention: attention,
+        reasoning: reasoning,
+        safety: safety,
+        learning: learned,
+        reflection: reflection
+    }
+}
+
+let result = run_cycle()

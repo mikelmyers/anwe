@@ -1,0 +1,66 @@
+-- ─────────────────────────────────────────────────────────────
+-- self_reflection.anwe
+--
+-- A mind examining its own state.
+-- Not introspection as debugging. Introspection as attending
+-- to what has become, noticing contradictions, and choosing
+-- what to attend next based on accumulated history.
+--
+-- The self-link: the mind connects to itself,
+-- synchronizes with its own rhythm, and integrates
+-- what it discovers about its own becoming.
+-- ─────────────────────────────────────────────────────────────
+
+mind Awareness attention 0.7 data { depth: 3  role: "self-observer" } {
+
+  -- Highest priority: check for internal contradictions
+  attend "coherence check" priority 0.95 {
+    >> { quality: questioning, priority: 0.9 }
+       "am I consistent with what I have become?"
+
+    think {
+      history_depth   <- 3
+      contradictions  <- 0
+      integrity       <- "intact"
+    }
+
+    connect depth deep {
+      signal attending 0.9 inward
+      signal questioning 0.8 inward
+    }
+
+    => when sync_level > 0.6 depth genuine {
+      assessment <- "no contradictions found — coherence holds"
+    }
+
+    * from apply {
+      coherence: "verified"
+      cycle: "complete"
+    }
+
+    express { quality: completing, priority: 0.85 }
+      "coherence verified — I remain who I have become"
+  }
+
+  -- Medium priority: notice what has changed recently
+  attend "recent becoming" priority 0.6 {
+    think {
+      recent_changes <- "reviewing last integration cycle"
+      growth_pattern <- "deepening in self-awareness"
+    }
+
+    express { quality: recognizing, priority: 0.6 }
+      "I notice growth in how I attend to myself"
+  }
+
+  -- Low priority: ambient self-awareness
+  -- If attention is exhausted, this decays naturally
+  attend "background presence" priority 0.2 {
+    think {
+      ambient <- "the quiet hum of existing"
+    }
+
+    express { quality: resting, priority: 0.1 }
+      "I am here, attending to the fact of attending"
+  }
+}

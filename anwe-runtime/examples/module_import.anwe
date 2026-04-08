@@ -1,0 +1,210 @@
+-- ─────────────────────────────────────────────────────────
+-- MODULE SYSTEM IN ANWE
+--
+-- Import agents, patterns, and links from other .anwe files.
+-- Modules are the unit of code reuse in ANWE.
+--
+-- A module exports agents and link patterns.
+-- An importing file uses `import` to bring them into scope.
+-- Imported agents participate as if declared locally.
+--
+-- What this proves about ANWE:
+--   - Code reuse through module imports
+--   - Agents can be shared across files
+--   - Link patterns compose across module boundaries
+--   - Namespace isolation prevents collisions
+--
+-- BUILDSHEET items covered:
+--   [x] Module system (Language Features)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- MODULE DECLARATIONS
+-- ═══════════════════════════════════════════════════════════
+
+-- Import a reusable guardrail module
+import "guardrail" as Safety {
+  agents: [InputFilter, OutputFilter]
+  links:  [CheckInput, CheckOutput]
+}
+
+-- Import a shared model registry
+import "model_router" as Router {
+  agents: [FastModel, PremiumModel, RouterAgent]
+  links:  [RouteQuery]
+}
+
+-- Import a utility module for metrics
+import "metrics" as Metrics {
+  agents: [MetricCollector, Dashboard]
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LOCAL AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+agent UserRequest data {
+  query: "Explain quantum computing in simple terms"
+  session_id: "sess_042"
+  user_tier: "premium"
+}
+
+agent Pipeline data {
+  stages_completed: 0
+  total_stages: 4
+}
+
+agent Response data {
+  content: ""
+  model_used: ""
+  safety_score: 0.0
+  latency_ms: 0
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 3 within 30000 {
+  Pipeline
+  Response
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LINKS — composing imported modules with local logic
+-- ═══════════════════════════════════════════════════════════
+
+-- Step 1: Safety check using imported guardrail module
+link UserRequest <-> Safety.InputFilter priority high {
+  >> { quality: attending, priority: 0.95, confidence: 0.9, half_life: 100 }
+     "Safety-checking user input via imported guardrail module"
+
+  connect depth full {
+    signal attending 0.9 between data "input validation"
+    signal recognizing 0.85 inward data "safety rules loaded from module"
+  }
+
+  UserRequest ~ Safety.InputFilter until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    safety_passed <- "true"
+    safety_score <- 0.95
+    stage <- "input_safety"
+  }
+
+  <= when confidence <= 0.2 data "input rejected by imported safety module"
+
+  * from apply {
+    stage: "input_safety"
+    module: "guardrail"
+  }
+}
+
+-- Step 2: Route to appropriate model using imported router
+link Pipeline <-> Router.RouterAgent priority high {
+  >> { quality: recognizing, priority: 0.9, confidence: 0.85, half_life: 150 }
+     "Routing query via imported model router"
+
+  connect depth full {
+    signal recognizing 0.85 between data "classifying query complexity"
+    signal attending   0.8  inward  data "selecting model from registry"
+  }
+
+  Pipeline ~ Router.RouterAgent until synchronized
+
+  if Pipeline.user_tier == "premium" {
+    => when sync_level > 0.6 depth deep {
+      selected_model <- "premium"
+      reason <- "premium user tier"
+    }
+  } else {
+    => when sync_level > 0.6 depth partial {
+      selected_model <- "fast"
+      reason <- "standard routing"
+    }
+  }
+
+  * from apply {
+    stage: "routing"
+    module: "model_router"
+  }
+}
+
+-- Step 3: Generate response with selected model
+link Router.PremiumModel <-> Response priority high {
+  >> { quality: applying, priority: 0.9, confidence: 0.8, half_life: 200 }
+     "Generating response with routed model"
+
+  connect depth deep {
+    signal applying    0.9  between data "inference in progress"
+    signal recognizing 0.85 inward  data "response forming"
+  }
+
+  Router.PremiumModel ~ Response until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    content <- "Quantum computing uses quantum bits (qubits) that can be 0 and 1 simultaneously..."
+    model_used <- "premium-v3"
+    tokens_used <- 287
+    latency_ms <- 340
+  }
+
+  * from apply {
+    stage: "generation"
+    source: "imported_model"
+  }
+}
+
+-- Step 4: Output safety using imported module
+link Response <-> Safety.OutputFilter priority high {
+  >> { quality: attending, priority: 0.95, confidence: 0.9, half_life: 100 }
+     "Output safety check via imported guardrail"
+
+  connect depth full {
+    signal attending   0.9  between data "checking response safety"
+    signal recognizing 0.85 inward  data "output rules from module"
+  }
+
+  Response ~ Safety.OutputFilter until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    output_safe <- "true"
+    final_safety_score <- 0.97
+  }
+
+  <= when confidence <= 0.3 data "output rejected by safety module"
+
+  * from apply {
+    stage: "output_safety"
+    module: "guardrail"
+  }
+}
+
+-- Step 5: Record metrics via imported metrics module
+link Response <-> Metrics.MetricCollector priority low {
+  >> { quality: completing, priority: 0.6, confidence: 0.9, half_life: 500 }
+     "Recording pipeline metrics via imported module"
+
+  connect depth partial {
+    signal completing 0.7 between data "metrics collection"
+    signal attending  0.6 inward  data "dashboard update"
+  }
+
+  Response ~ Metrics.MetricCollector until synchronized
+
+  => when sync_level > 0.5 depth partial {
+    metric_latency <- 340
+    metric_tokens <- 287
+    metric_safety <- 0.97
+    metric_model <- "premium-v3"
+  }
+
+  * from apply {
+    stage: "metrics"
+    module: "metrics"
+  }
+}

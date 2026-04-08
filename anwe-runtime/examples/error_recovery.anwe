@@ -1,0 +1,241 @@
+-- ─────────────────────────────────────────────────────────
+-- ERROR RECOVERY IN ANWE
+--
+-- What happens when a bridge participant crashes,
+-- a network connection drops, or an external system fails.
+--
+-- ANWE's answer: supervision + pending? + graceful degradation.
+-- Crashes don't propagate. They trigger recovery strategies.
+--
+-- What this proves about ANWE:
+--   - Supervision trees restart crashed agents
+--   - Bridge failures produce pending? not exceptions
+--   - Circuit breakers prevent cascade failures
+--   - Graceful degradation is structural not ad-hoc
+--
+-- BUILDSHEET items covered:
+--   [x] Error recovery (Language Features)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+-- Primary model — may crash or become unresponsive
+agent PrimaryModel attention 0.9 external("callback", "primary") data {
+  model: "llm-70b"
+  status: "ready"
+  consecutive_failures: 0
+  circuit_breaker: "closed"
+}
+
+-- Fallback model — smaller, more reliable
+agent FallbackModel attention 0.8 external("callback", "fallback") data {
+  model: "llm-7b"
+  status: "ready"
+  consecutive_failures: 0
+}
+
+-- Cache for serving stale results during outages
+agent StaleCache attention 0.5 data {
+  entries: 10000
+  staleness_threshold_ms: 300000
+  status: "ready"
+}
+
+-- Request handler
+agent Handler attention 0.9 data {
+  request_id: ""
+  strategy: "primary_first"
+  retries_remaining: 3
+  degradation_level: "none"
+}
+
+-- Recovery coordinator
+agent RecoveryManager data {
+  active_incidents: []
+  recovery_attempts: 0
+  last_healthy_state: ""
+}
+
+-- Health dashboard
+agent HealthDashboard data {
+  primary_status: "unknown"
+  fallback_status: "unknown"
+  cache_status: "unknown"
+  degradation_level: "none"
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION — the core of error recovery
+-- ═══════════════════════════════════════════════════════════
+
+-- rest_for_one: if PrimaryModel crashes, restart it
+-- but don't restart FallbackModel or Cache
+supervise rest_for_one max_restarts 5 within 30000 {
+  PrimaryModel
+  FallbackModel
+  StaleCache
+  Handler
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LINKS
+-- ═══════════════════════════════════════════════════════════
+
+-- Normal path: try primary model
+link Handler <-> PrimaryModel priority high {
+  >> { quality: applying, priority: 0.95, confidence: 0.85, half_life: 200 }
+     "Attempting inference via primary model"
+
+  connect depth deep {
+    signal applying    0.9  between data "inference request"
+    signal recognizing 0.85 inward  data "processing"
+  }
+
+  Handler ~ PrimaryModel until synchronized timeout 5000 {
+    on_timeout: pending
+    retry: 2
+    retry_delay: 500
+  }
+
+  -- Circuit breaker check
+  if PrimaryModel.circuit_breaker == "open" {
+    <= when confidence <= 0.1 data "circuit breaker open — skipping primary"
+  }
+
+  => when sync_level > 0.7 depth deep {
+    response <- "Generated response from primary model"
+    latency_ms <- 800
+    model_used <- "llm-70b"
+    degradation <- "none"
+  }
+
+  * from apply {
+    stage: "primary_attempt"
+    success: "true"
+  }
+}
+
+-- Fallback path: if primary fails, try smaller model
+link Handler <-> FallbackModel priority high on_failure_of PrimaryModel {
+  >> { quality: applying, priority: 0.9, confidence: 0.8, half_life: 200 }
+     "Primary failed — falling back to smaller model"
+
+  connect depth full {
+    signal applying    0.85 between data "fallback inference"
+    signal recognizing 0.8  inward  data "degraded mode active"
+  }
+
+  Handler ~ FallbackModel until synchronized timeout 3000 {
+    on_timeout: pending
+  }
+
+  => when sync_level > 0.6 depth deep {
+    response <- "Generated response from fallback model (may be less detailed)"
+    latency_ms <- 200
+    model_used <- "llm-7b"
+    degradation <- "quality"
+    quality_note <- "Response may be less nuanced than primary"
+  }
+
+  * from apply {
+    stage: "fallback"
+    degradation: "quality"
+  }
+}
+
+-- Last resort: serve stale cached response
+link Handler <-> StaleCache priority normal on_failure_of FallbackModel {
+  >> { quality: recognizing, priority: 0.7, confidence: 0.6, half_life: 100 }
+     "Both models failed — serving cached response"
+
+  connect depth partial {
+    signal recognizing 0.7  between data "cache lookup"
+    signal attending   0.6  inward  data "staleness check"
+  }
+
+  Handler ~ StaleCache until synchronized
+
+  if StaleCache.entries > 0 {
+    => when sync_level > 0.5 depth partial {
+      response <- "Previously cached response (may be outdated)"
+      staleness_ms <- 120000
+      degradation <- "freshness"
+      cache_hit <- "true"
+      warning <- "This response was cached 2 minutes ago"
+    }
+  } else {
+    <= when confidence <= 0.2 data "no cache available — service unavailable"
+  }
+
+  * from apply {
+    stage: "stale_cache"
+    degradation: "freshness"
+  }
+}
+
+-- Recovery: monitor and heal
+link RecoveryManager <-> PrimaryModel priority high every 30 ticks {
+  >> { quality: questioning, priority: 0.85, confidence: 0.7, half_life: 100 }
+     "Checking primary model health for recovery"
+
+  connect depth full {
+    signal questioning 0.8  between data "health probe"
+    signal attending   0.75 inward  data "status check"
+  }
+
+  RecoveryManager ~ PrimaryModel until synchronized timeout 2000 {
+    on_timeout: pending
+  }
+
+  if PrimaryModel.consecutive_failures > 3 {
+    -- Open circuit breaker
+    => when sync_level > 0.5 depth deep {
+      circuit_breaker <- "open"
+      recovery_action <- "waiting_for_cooldown"
+      cooldown_remaining_s <- 60
+    }
+  }
+
+  if PrimaryModel.consecutive_failures == 0 {
+    -- Close circuit breaker, system healed
+    => when sync_level > 0.7 depth deep {
+      circuit_breaker <- "closed"
+      recovery_action <- "healed"
+      degradation <- "none"
+    }
+  }
+
+  * from apply {
+    stage: "recovery_check"
+  }
+}
+
+-- Health dashboard aggregation
+link RecoveryManager <-> HealthDashboard priority low {
+  >> { quality: completing, priority: 0.6, confidence: 0.95, half_life: 500 }
+     "Updating health dashboard"
+
+  connect depth partial {
+    signal completing 0.6 between data "status aggregation"
+  }
+
+  RecoveryManager ~ HealthDashboard until synchronized
+
+  => when sync_level > 0.5 depth partial {
+    primary_status <- "degraded"
+    fallback_status <- "healthy"
+    cache_status <- "healthy"
+    degradation_level <- "quality"
+    active_incidents <- 1
+    mttr_estimate_s <- 45
+  }
+
+  * from apply {
+    stage: "dashboard_update"
+  }
+}

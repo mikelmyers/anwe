@@ -1,0 +1,25 @@
+-- module_functions.anwe -- demonstrates importing functions from modules
+
+import "string_utils" as Str {
+}
+
+-- Use imported functions with namespace prefix
+let greeting = Str.greet("ANWE")
+let loud = Str.shout("attention")
+let quiet = Str.whisper("SILENCE")
+let excited = Str.exclaim("wow")
+
+-- Imported let bindings are also namespaced
+let lib_version = Str.version
+
+-- Agents can use imported functions too
+agent Speaker
+agent Listener
+
+link Speaker <-> Listener {
+    >> Str.shout("wake up")
+    connect depth surface {
+        signal attending 0.8 between
+    }
+    Speaker ~ Listener until synchronized
+}

@@ -1,0 +1,263 @@
+-- ─────────────────────────────────────────────────────────
+-- PLANNING WITH UNCERTAINTY IN ANWE
+--
+-- Decompose a goal into steps.
+-- Assign confidence to each step.
+-- Track uncertainty through the plan.
+-- If a step fails, the whole plan's confidence drops.
+--
+-- ANWE's confidence propagates naturally:
+--   - Each step carries confidence
+--   - Later steps inherit uncertainty from earlier ones
+--   - Reject gates cancel low-confidence plans
+--   - Commit checkpoints enable re-planning
+--
+-- What this proves about ANWE:
+--   - Confidence as planning uncertainty (not probability)
+--   - FieldAccess chains propagate uncertainty
+--   - Reject as plan abandonment
+--   - Half_life: farther steps are less certain
+--
+-- BUILDSHEET items covered:
+--   [x] Planning with uncertainty (Reasoning & Planning)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+-- The goal to plan for
+agent Goal data {
+  description: "Deploy a new ML model to production"
+  deadline: "next Friday"
+  priority: "high"
+}
+
+-- Planning stages
+agent Step1_Train attention 0.8 external("callback", "planner") data {
+  task: "train model on new data"
+  estimated_hours: 4
+}
+
+agent Step2_Evaluate attention 0.7 data {
+  task: "evaluate model on test set"
+  estimated_hours: 2
+}
+
+agent Step3_Review attention 0.6 data {
+  task: "code review and security audit"
+  estimated_hours: 3
+}
+
+agent Step4_Deploy attention 0.5 data {
+  task: "deploy to production"
+  estimated_hours: 1
+}
+
+-- Plan tracker
+agent Plan data {
+  total_steps: 4
+  status: "planning"
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 3 within 20000 {
+  permanent Step1_Train
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- STEP 1: Train model
+-- Highest confidence: we know how to do this.
+-- Longest half_life: training results last.
+-- ═══════════════════════════════════════════════════════════
+
+link Goal <-> Step1_Train priority high {
+  >> { quality: attending, priority: 0.95, confidence: 0.9, half_life: 500 }
+     "Step 1: Train model on new data"
+
+  connect depth deep {
+    signal attending   0.9  between data "planning training phase"
+    signal recognizing 0.85 inward  data "estimating training time and resources"
+  }
+
+  Goal ~ Step1_Train until resonating
+
+  <= when confidence <= 0.3 data "training step infeasible — re-plan"
+
+  => when sync_level > 0.7 depth deep {
+    step1_status <- "planned"
+    step1_confidence <- "0.90"
+    step1_hours <- "4"
+    step1_risk <- "low — standard training pipeline"
+    step1_dependencies <- "none"
+  }
+
+  * from apply {
+    stage: "planning"
+    step: "1"
+    task: "train"
+    confidence: "0.90"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- STEP 2: Evaluate model
+-- Slightly lower confidence: depends on Step 1 results.
+-- ═══════════════════════════════════════════════════════════
+
+link Step1_Train <-> Step2_Evaluate priority high {
+  >> { quality: recognizing, priority: 0.9, confidence: 0.85, half_life: 400 }
+     "Step 2: Evaluate trained model"
+
+  connect depth deep {
+    signal recognizing 0.85 between data "planning evaluation phase"
+    signal questioning 0.7  inward  data "evaluation depends on training quality"
+  }
+
+  Step1_Train ~ Step2_Evaluate until resonating
+
+  <= when confidence <= 0.3 data "evaluation cannot proceed — training failed"
+
+  => when sync_level > 0.7 depth deep {
+    step2_status <- "planned"
+    step2_confidence <- "0.85"
+    step2_hours <- "2"
+    step2_risk <- "medium — depends on training convergence"
+    step2_depends_on <- Step1_Train.step1_confidence
+    step2_cumulative_confidence <- "0.765"
+  }
+
+  * from apply {
+    stage: "planning"
+    step: "2"
+    task: "evaluate"
+    confidence: "0.85"
+    cumulative: "0.765"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- STEP 3: Code review and security audit
+-- Lower confidence: external dependency (reviewer availability).
+-- ═══════════════════════════════════════════════════════════
+
+link Step2_Evaluate <-> Step3_Review priority normal {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.75, half_life: 300 }
+     "Step 3: Code review and security audit"
+
+  connect depth deep {
+    signal recognizing 0.8  between data "planning review phase"
+    signal questioning 0.7  inward  data "review depends on reviewer availability"
+    signal disturbed   0.4  inward  data "security audit may find issues requiring rework"
+  }
+
+  Step2_Evaluate ~ Step3_Review until resonating
+
+  <= when confidence <= 0.3 data "review blocked — no reviewer available"
+
+  pending? receiver_not_ready {
+    guidance "waiting for reviewer availability"
+    wait 10 tick
+  }
+
+  => when sync_level > 0.7 depth deep {
+    step3_status <- "planned"
+    step3_confidence <- "0.75"
+    step3_hours <- "3"
+    step3_risk <- "high — reviewer availability uncertain, audit may require rework"
+    step3_depends_on <- Step2_Evaluate.step2_cumulative_confidence
+    step3_cumulative_confidence <- "0.574"
+  }
+
+  * from apply {
+    stage: "planning"
+    step: "3"
+    task: "review"
+    confidence: "0.75"
+    cumulative: "0.574"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- STEP 4: Deploy to production
+-- Lowest confidence: depends on all prior steps.
+-- Shortest half_life: deployment is time-sensitive.
+-- ═══════════════════════════════════════════════════════════
+
+link Step3_Review <-> Step4_Deploy priority normal {
+  >> { quality: recognizing, priority: 0.8, confidence: 0.7, half_life: 200 }
+     "Step 4: Deploy to production"
+
+  connect depth deep {
+    signal recognizing 0.75 between data "planning deployment phase"
+    signal questioning 0.65 inward  data "deployment depends on all prior steps succeeding"
+    signal disturbed   0.5  inward  data "production deployment carries inherent risk"
+  }
+
+  Step3_Review ~ Step4_Deploy until resonating
+
+  <= when confidence <= 0.3 data "deployment blocked — prior steps incomplete or failed"
+
+  => when sync_level > 0.7 depth deep {
+    step4_status <- "planned"
+    step4_confidence <- "0.70"
+    step4_hours <- "1"
+    step4_risk <- "high — production impact if issues found"
+    step4_depends_on <- Step3_Review.step3_cumulative_confidence
+    step4_cumulative_confidence <- "0.402"
+  }
+
+  * from apply {
+    stage: "planning"
+    step: "4"
+    task: "deploy"
+    confidence: "0.70"
+    cumulative: "0.402"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- PLAN SUMMARY: Aggregate uncertainty
+-- ═══════════════════════════════════════════════════════════
+
+link Step4_Deploy <-> Plan priority background {
+  >> { quality: recognizing, priority: 0.5, confidence: 0.6, half_life: 100 }
+     "Computing overall plan confidence"
+
+  connect depth full {
+    signal recognizing 0.5 between data "aggregating step uncertainties"
+  }
+
+  Step4_Deploy ~ Plan until synchronized
+
+  => when sync_level > 0.3 depth deep {
+    plan_confidence <- "0.402"
+    plan_hours <- "10"
+    highest_risk_step <- "Step 3 (review — reviewer availability)"
+    bottleneck <- "code review and security audit"
+    recommendation <- "schedule reviewer before starting, have backup reviewer"
+    step1_conf <- Step1_Train.step1_confidence
+    step2_conf <- Step2_Evaluate.step2_confidence
+    step3_conf <- Step3_Review.step3_confidence
+    step4_conf <- Step4_Deploy.step4_confidence
+    critical_path <- "train(0.90) → eval(0.85) → review(0.75) → deploy(0.70)"
+    overall_risk <- "medium-high — cumulative uncertainty compounds across 4 steps"
+  }
+
+  * from apply {
+    stage: "plan_summary"
+    steps: 4
+    cumulative_confidence: "0.402"
+    estimated_hours: 10
+  }
+}

@@ -1,0 +1,179 @@
+-- ─────────────────────────────────────────────────────────
+-- TIME-BASED TRIGGERS IN ANWE
+--
+-- Run links on schedule: every N ticks, after delay,
+-- or on cron-like intervals.
+--
+-- ANWE's tick system provides temporal awareness.
+-- Time triggers extend this to scheduled execution.
+--
+-- What this proves about ANWE:
+--   - every N ticks — periodic execution
+--   - after N ticks — delayed one-shot execution
+--   - Temporal triggers compose with link priorities
+--   - Background monitoring is native, not bolted on
+--
+-- BUILDSHEET items covered:
+--   [x] Time-based triggers (Language Features)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+agent HealthMonitor attention 0.6 data {
+  check_count: 0
+  last_status: "healthy"
+  uptime_pct: 99.9
+}
+
+agent ModelService attention 0.8 external("callback", "model") data {
+  model: "llm-v3"
+  requests_served: 0
+  avg_latency_ms: 45
+}
+
+agent DriftDetector attention 0.7 data {
+  baseline_accuracy: 0.94
+  current_accuracy: 0.94
+  drift_detected: "false"
+}
+
+agent CacheManager attention 0.5 data {
+  entries: 1500
+  hit_rate: 0.82
+  last_eviction: "none"
+}
+
+agent DailyReport data {
+  generated_at: ""
+  metrics: []
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 5 within 60000 {
+  HealthMonitor
+  DriftDetector
+  CacheManager
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- TIME-TRIGGERED LINKS
+-- ═══════════════════════════════════════════════════════════
+
+-- Health check every 30 ticks (~ every 30 seconds)
+link HealthMonitor <-> ModelService priority normal every 30 ticks {
+  >> { quality: attending, priority: 0.7, confidence: 0.95, half_life: 100 }
+     "Periodic health check"
+
+  connect depth partial {
+    signal attending   0.7 between data "health ping"
+    signal recognizing 0.6 inward  data "status response"
+  }
+
+  HealthMonitor ~ ModelService until synchronized
+
+  => when sync_level > 0.5 depth partial {
+    status <- "healthy"
+    latency_ms <- 42
+    requests_since_last <- 150
+    memory_usage_pct <- 67
+  }
+
+  if ModelService.avg_latency_ms > 200 {
+    => when sync_level > 0.5 depth deep {
+      status <- "degraded"
+      alert <- "latency above threshold"
+    }
+  }
+
+  * from apply {
+    stage: "health_check"
+    check_number: "incremented"
+  }
+}
+
+-- Drift detection every 500 ticks (~ every ~8 minutes)
+link DriftDetector <-> ModelService priority high every 500 ticks {
+  >> { quality: questioning, priority: 0.85, confidence: 0.8, half_life: 300 }
+     "Scheduled drift evaluation"
+
+  connect depth deep {
+    signal questioning 0.8  between data "evaluating against baseline"
+    signal recognizing 0.75 inward  data "accuracy measurement"
+  }
+
+  DriftDetector ~ ModelService until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    current_accuracy <- 0.91
+    baseline_accuracy <- 0.94
+    drift_magnitude <- 0.03
+    drift_significant <- "true"
+  }
+
+  if DriftDetector.current_accuracy < 0.90 {
+    <= when confidence <= 0.5 data "drift too severe — flagging for retraining"
+  }
+
+  * from apply {
+    stage: "drift_check"
+    baseline: 0.94
+    current: 0.91
+  }
+}
+
+-- Cache eviction every 100 ticks
+link CacheManager <-> CacheManager priority low every 100 ticks {
+  >> { quality: attending, priority: 0.5, confidence: 0.9, half_life: 200 }
+     "Periodic cache maintenance"
+
+  connect depth partial {
+    signal attending 0.5 inward data "scanning expired entries"
+  }
+
+  => when sync_level > 0.4 depth partial {
+    entries_before <- 1500
+    expired_count <- 47
+    entries_after <- 1453
+    new_hit_rate <- 0.85
+  }
+
+  * from apply {
+    stage: "cache_eviction"
+    evicted: 47
+  }
+}
+
+-- Daily report — after 86400 ticks (one-shot delayed execution)
+link HealthMonitor <-> DailyReport priority low after 86400 ticks {
+  >> { quality: completing, priority: 0.6, confidence: 0.95, half_life: 1000 }
+     "Generating daily summary report"
+
+  connect depth deep {
+    signal completing  0.7 between data "compiling daily metrics"
+    signal recognizing 0.8 inward  data "formatting report"
+  }
+
+  HealthMonitor ~ DailyReport until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    total_health_checks <- 2880
+    uptime_pct <- 99.95
+    avg_latency <- 44
+    drift_events <- 1
+    cache_evictions <- 864
+    requests_served <- 432000
+  }
+
+  * from apply {
+    stage: "daily_report"
+    period: "24h"
+  }
+}

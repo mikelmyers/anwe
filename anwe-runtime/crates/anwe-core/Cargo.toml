@@ -1,0 +1,10 @@
+[package]
+name = "anwe-core"
+version.workspace = true
+edition.workspace = true
+description = "Core types for ANWE — Pulse, Field, Attendant, NotYet, Becoming"
+
+[dependencies]
+# No external dependencies for core types.
+# Zero overhead. Zero allocation in steady state.
+# The core is self-contained like a neuron's membrane.

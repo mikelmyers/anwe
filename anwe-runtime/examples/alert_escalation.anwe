@@ -1,0 +1,285 @@
+-- ─────────────────────────────────────────────────────────
+-- ALERT ESCALATION IN ANWE
+--
+-- Background monitoring detects issues.
+-- As severity increases, priority escalates:
+--   background → low → normal → high → critical
+--
+-- ANWE's link priorities are native escalation:
+--   - Background links monitor continuously
+--   - When issue detected, higher-priority links activate
+--   - Each level carries more urgency and attention
+--   - Critical priority demands immediate response
+--
+-- What this proves about ANWE:
+--   - Link priorities as escalation levels (not ad-hoc)
+--   - Attention budgets increase with severity
+--   - Reject gates at each level prevent false escalation
+--   - Commit audit trail tracks the escalation path
+--
+-- BUILDSHEET items covered:
+--   [x] Alert escalation (Monitoring & Ops)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+-- The system being monitored
+agent System attention 0.5 external("callback", "system") data {
+  service: "inference-api"
+  baseline_latency: "50ms"
+  baseline_error_rate: "0.01"
+}
+
+-- Monitor that watches metrics
+agent Monitor attention 0.8 data {
+  check_interval: "30s"
+  thresholds: "latency>100ms, error_rate>0.05"
+}
+
+-- On-call responder
+agent Responder attention 0.9 external("callback", "responder") data {
+  role: "on_call"
+  escalation_policy: "5min_per_level"
+}
+
+-- Incident record
+agent Incident data {
+  status: "monitoring"
+  severity: "none"
+  escalation_level: 0
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 5 within 60000 {
+  permanent System
+  permanent Responder
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LEVEL 0: Background monitoring (all normal)
+--
+-- Background priority: lowest level.
+-- Just watching metrics. No issue yet.
+-- ═══════════════════════════════════════════════════════════
+
+link System <-> Monitor priority background {
+  >> { quality: attending, priority: 0.3, confidence: 0.5, half_life: 50 }
+     "Background monitoring: checking system health"
+
+  connect depth partial {
+    signal attending   0.4 inward data "checking latency and error rate"
+    signal recognizing 0.3 inward data "metrics within normal range"
+  }
+
+  System ~ Monitor until synchronized
+
+  => when sync_level > 0.3 depth partial {
+    level0_status <- "healthy"
+    level0_latency <- "48ms"
+    level0_error_rate <- "0.009"
+    level0_assessment <- "all metrics nominal"
+  }
+
+  * from apply {
+    stage: "monitoring"
+    level: "0_background"
+    status: "healthy"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LEVEL 1: Low priority alert (latency spike detected)
+--
+-- Something looks off. Latency is elevated.
+-- Low priority: note it but don't wake anyone up.
+-- ═══════════════════════════════════════════════════════════
+
+link System <-> Monitor priority low {
+  >> { quality: questioning, priority: 0.5, confidence: 0.6, half_life: 100 }
+     "Low alert: latency spike detected"
+
+  connect depth deep {
+    signal questioning 0.6  inward  data "latency has increased above baseline"
+    signal attending   0.5  between data "measuring deviation from baseline"
+    signal disturbed   0.3  inward  data "possible transient issue"
+  }
+
+  System ~ Monitor until resonating
+
+  -- Reject false alerts: if metric returns to normal, don't escalate
+  <= when confidence <= 0.3 data "false alert — metrics returned to normal"
+
+  => when sync_level > 0.7 depth deep {
+    level1_status <- "elevated"
+    level1_latency <- "95ms"
+    level1_error_rate <- "0.02"
+    level1_assessment <- "latency elevated but below critical threshold"
+    level1_duration <- "2min"
+  }
+
+  * from apply {
+    stage: "alert"
+    level: "1_low"
+    status: "elevated"
+    metric: "latency"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LEVEL 2: Normal priority (sustained issue, error rate rising)
+--
+-- Issue persists. Error rate climbing too.
+-- Normal priority: start investigating.
+-- ═══════════════════════════════════════════════════════════
+
+link System <-> Monitor priority normal {
+  >> { quality: disturbed, priority: 0.7, confidence: 0.75, half_life: 200 }
+     "Normal alert: sustained latency + rising errors"
+
+  connect depth deep {
+    signal disturbed   0.7  between data "issue is sustained, not transient"
+    signal questioning 0.65 inward  data "error rate climbing alongside latency"
+    signal attending   0.6  between data "correlating multiple degraded metrics"
+  }
+
+  System ~ Monitor until resonating
+
+  <= when confidence <= 0.3 data "issue self-resolved before escalation"
+
+  => when sync_level > 0.7 depth deep {
+    level2_status <- "degraded"
+    level2_latency <- "180ms"
+    level2_error_rate <- "0.08"
+    level2_assessment <- "service degraded — multiple metrics affected"
+    level2_duration <- "7min"
+    level2_prior_latency <- Monitor.level1_latency
+  }
+
+  * from apply {
+    stage: "alert"
+    level: "2_normal"
+    status: "degraded"
+    metrics_affected: 2
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LEVEL 3: High priority (service significantly degraded)
+--
+-- Responder is now notified.
+-- High priority: active incident.
+-- ═══════════════════════════════════════════════════════════
+
+link Monitor <-> Responder priority high {
+  >> { quality: disturbed, priority: 0.9, confidence: 0.85, half_life: 400 }
+     "HIGH ALERT: service significantly degraded — responder notified"
+
+  connect depth deep {
+    signal disturbed   0.85 between data "escalating to on-call responder"
+    signal attending   0.8  between data Monitor.level2_assessment
+    signal questioning 0.7  inward  data "is this heading toward outage?"
+  }
+
+  Monitor ~ Responder until resonating
+
+  <= when confidence <= 0.3 data "issue recovering — de-escalating from high"
+
+  => when sync_level > 0.7 depth deep {
+    level3_status <- "incident"
+    level3_latency <- "350ms"
+    level3_error_rate <- "0.15"
+    level3_assessment <- "active incident — significant user impact"
+    level3_responder_ack <- "acknowledged"
+    level3_prior_status <- Monitor.level2_status
+  }
+
+  * from apply {
+    stage: "incident"
+    level: "3_high"
+    status: "active_incident"
+    responder: "on_call"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LEVEL 4: Critical (outage)
+--
+-- Service is down. Maximum priority.
+-- All attention focused on recovery.
+-- ═══════════════════════════════════════════════════════════
+
+link Monitor <-> Responder priority critical {
+  >> { quality: disturbed, priority: 1.0, confidence: 0.95, half_life: 1000 }
+     "CRITICAL: service outage — all hands"
+
+  connect depth deep {
+    signal disturbed   0.95 between data "complete service outage detected"
+    signal attending   0.9  between data "all error metrics critical"
+    signal questioning 0.8  inward  data "what is the root cause?"
+  }
+
+  Monitor ~ Responder until resonating
+
+  => when sync_level > 0.7 depth deep {
+    level4_status <- "outage"
+    level4_latency <- "timeout"
+    level4_error_rate <- "0.95"
+    level4_assessment <- "OUTAGE — service completely unavailable"
+    level4_root_cause <- "database connection pool exhausted"
+    level4_mitigation <- "restarting connection pool, scaling read replicas"
+    escalation_path <- "background(healthy) → low(elevated) → normal(degraded) → high(incident) → critical(outage)"
+  }
+
+  * from apply {
+    stage: "outage"
+    level: "4_critical"
+    status: "outage"
+    root_cause: "connection_pool_exhausted"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- RESOLUTION: Record the full escalation path
+-- ═══════════════════════════════════════════════════════════
+
+link Responder <-> Incident priority background {
+  >> { quality: recognizing, priority: 0.4, confidence: 0.6, half_life: 100 }
+     "Recording incident and escalation path"
+
+  connect depth full {
+    signal recognizing 0.5 between data "documenting incident timeline"
+  }
+
+  Responder ~ Incident until synchronized
+
+  => when sync_level > 0.3 depth deep {
+    final_severity <- "critical"
+    total_escalation_levels <- "5"
+    path <- Responder.level4_assessment
+    root_cause <- Responder.level4_root_cause
+    mitigation <- Responder.level4_mitigation
+    time_to_detection <- "2min"
+    time_to_escalation <- "12min"
+    resolution_status <- "mitigating"
+  }
+
+  * from apply {
+    stage: "resolution"
+    incident_id: "INC-2024-042"
+    severity: "critical"
+    escalation_levels: 5
+  }
+}

@@ -1,0 +1,159 @@
+-- ═══════════════════════════════════════════════════════════
+-- text_processor_v09.anwe — v0.9 Feature Showcase
+-- Autonomous Agent Neural Weave
+--
+-- Demonstrates: return, index_of, char_at, slice,
+--   map, filter, reduce, closures, standard library patterns
+-- ═══════════════════════════════════════════════════════════
+
+-- ─── Helper: tokenize a CSV line ──────────────────────────
+fn parse_csv_line(line) {
+    split(line, ",")
+}
+
+-- ─── Early return: find first match ───────────────────────
+fn find_first(items, target) {
+    for item in items {
+        if contains(item, target) { return item }
+    };
+    return "not found"
+}
+
+-- ─── Word frequency counter ──────────────────────────────
+fn word_frequencies(text) {
+    let word_list = split(lower(text), " ");
+    let unique = [];
+    let counts = [];
+
+    for w in word_list {
+        let idx = index_of(unique, w);
+        if idx < 0 {
+            let unique = append(unique, w);
+            let counts = append(counts, 1)
+        } else {
+            -- increment count at idx using slice + rebuild
+            let before = slice(counts, 0, idx);
+            let after = slice(counts, idx + 1);
+            let old_count = reduce(
+                slice(counts, idx, idx + 1),
+                |acc, x| x, 0
+            );
+            let counts = flatten([before, [old_count + 1], after])
+        }
+    };
+
+    {words: unique, counts: counts, total: len(word_list)}
+}
+
+-- ─── Text statistics ─────────────────────────────────────
+fn text_stats(text) {
+    let word_list = split(text, " ");
+    let word_count = len(word_list);
+    if word_count == 0 { return {words: 0, avg_len: 0, longest: ""} };
+
+    let lengths = map(word_list, |w| len(w));
+    let total_len = reduce(lengths, |acc, x| acc + x, 0);
+    let avg = total_len / word_count;
+
+    -- Find longest word using reduce
+    let longest = reduce(word_list, |best, w|
+        if len(w) > len(best) { w } else { best }
+    , "");
+
+    -- Classify words by length
+    let short = filter(word_list, |w| len(w) <= 3);
+    let medium = filter(word_list, |w| len(w) > 3);
+    let long = filter(word_list, |w| len(w) > 6);
+
+    return {
+        words: word_count,
+        avg_len: avg,
+        longest: longest,
+        short_count: len(short),
+        medium_count: len(medium),
+        long_count: len(long),
+        first_char: char_at(text, 0)
+    }
+}
+
+-- ─── Pipeline: process CSV data ──────────────────────────
+fn process_scores(csv_lines) {
+    -- Parse each line into [name, score]
+    let parsed = map(csv_lines, |line| parse_csv_line(line));
+
+    -- Extract scores (second column) and convert to numbers
+    let scores = map(parsed, |row| to_number(trim(slice(
+        join(row, ","),
+        index_of(join(row, ","), ",") + 1
+    ))));
+
+    -- Filter valid scores
+    let valid = filter(scores, |s| s > 0);
+    if len(valid) == 0 { return {avg: 0, max: 0, min: 0, count: 0} };
+
+    let total = reduce(valid, |acc, x| acc + x, 0);
+    let avg = total / len(valid);
+
+    -- Find max/min with reduce
+    let max_score = reduce(valid, |best, x| if x > best { x } else { best }, 0);
+    let min_score = reduce(valid, |best, x| if x < best { x } else { best }, 999);
+
+    return {
+        avg: avg,
+        max: max_score,
+        min: min_score,
+        count: len(valid),
+        passing: len(filter(valid, |s| s >= 70))
+    }
+}
+
+-- ─── Run the demo ────────────────────────────────────────
+
+print("═══ ANWE v0.9 — Text Processor Demo ═══")
+print("")
+
+-- 1. Text statistics
+let sample = "The autonomous agent neural weave processes language naturally"
+let stats = text_stats(sample)
+print("Text:", sample)
+print("  Words:", stats.words)
+print("  Avg length:", stats.avg_len)
+print("  Longest word:", stats.longest)
+print("  Short words:", stats.short_count)
+print("  First char:", stats.first_char)
+print("")
+
+-- 2. Word frequency
+let freq = word_frequencies("the cat sat on the mat the cat")
+print("Word frequencies:")
+print("  Words:", freq.words)
+print("  Counts:", freq.counts)
+print("  Total:", freq.total)
+print("")
+
+-- 3. String search with early return
+let logs = ["INFO: server started", "WARN: high memory", "ERROR: disk full", "INFO: request OK"]
+let error = find_first(logs, "ERROR")
+print("First error:", error)
+print("")
+
+-- 4. Score processing
+let scores = ["Alice, 95", "Bob, 82", "Charlie, 67", "Diana, 91", "Eve, 73"]
+let result = process_scores(scores)
+print("Score analysis:")
+print("  Count:", result.count)
+print("  Average:", result.avg)
+print("  Max:", result.max)
+print("  Min:", result.min)
+print("  Passing:", result.passing)
+print("")
+
+-- 5. Slice and char_at demo
+let greeting = "Hello, World!"
+print("String ops:")
+print("  slice(6,11):", slice(greeting, 6, 11))
+print("  char_at(0):", char_at(greeting, 0))
+print("  index_of('World'):", index_of(greeting, "World"))
+print("")
+
+print("═══ Demo complete ═══")

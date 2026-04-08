@@ -1,0 +1,261 @@
+-- ─────────────────────────────────────────────────────────
+-- SPECULATIVE DECODING IN ANWE
+--
+-- DraftModel (7B) drafts 3 batches of 8 tokens each.
+-- VerifyModel (70B) verifies each batch.
+-- Reject gates drop bad drafts.
+-- Output collects accepted tokens via FieldAccess.
+--
+-- What this proves about ANWE:
+--   - Sequential draft-verify links model speculative decoding
+--   - Reject gates drop bad token batches
+--   - FieldAccess collects accepted tokens across batches
+--   - Confidence tracks acceptance rate
+--
+-- BUILDSHEET items covered:
+--   [x] Speculative decoding (LLM Patterns)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+agent Prompt data {
+  text: "Explain why the sky is blue in simple terms."
+  max_tokens: 24
+  draft_batch_size: 8
+}
+
+agent DraftModel attention 0.7 external("callback", "draft_model") data {
+  model: "llama-7b"
+  parameters: "7B"
+  role: "drafter"
+  speed: "fast"
+}
+
+agent VerifyModel attention 0.9 external("callback", "verify_model") data {
+  model: "llama-70b"
+  parameters: "70B"
+  role: "verifier"
+  speed: "slow"
+}
+
+agent Output data {
+  accepted_tokens: 0
+  rejected_batches: 0
+  status: "decoding"
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 3 within 20000 {
+  permanent DraftModel
+  permanent VerifyModel
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- BATCH 1: Draft 8 tokens then verify
+-- ═══════════════════════════════════════════════════════════
+
+link Prompt <-> DraftModel priority high {
+  >> { quality: attending, priority: 0.9, confidence: 0.8, half_life: 200 }
+     "Batch 1: DraftModel generating 8 tokens speculatively"
+
+  connect depth deep {
+    signal attending   0.85 between data "drafting tokens 1-8 from prompt"
+    signal recognizing 0.8  inward  data "fast autoregressive generation"
+  }
+
+  Prompt ~ DraftModel until resonating
+
+  => when sync_level > 0.7 depth deep {
+    batch1_draft <- "The sky appears blue because sunlight scatters through"
+    batch1_tokens <- "8"
+    batch1_draft_confidence <- "0.82"
+  }
+
+  * from apply {
+    stage: "draft"
+    batch: "1"
+    tokens: 8
+  }
+}
+
+link DraftModel <-> VerifyModel priority high {
+  >> { quality: recognizing, priority: 0.95, confidence: 0.9, half_life: 300 }
+     "Batch 1: VerifyModel checking draft tokens"
+
+  connect depth deep {
+    signal recognizing 0.9  between data "verifying draft batch 1 against 70B model"
+    signal attending   0.85 between data DraftModel.batch1_draft
+  }
+
+  DraftModel ~ VerifyModel until resonating
+
+  -- Reject bad draft batch
+  <= when confidence <= 0.4 data "Batch 1 rejected — draft diverges from verifier"
+
+  => when sync_level > 0.7 depth deep {
+    batch1_accepted <- "true"
+    batch1_verified <- "The sky appears blue because sunlight scatters through"
+    batch1_acceptance_rate <- "8/8"
+    batch1_verify_confidence <- "0.93"
+  }
+
+  * from apply {
+    stage: "verify"
+    batch: "1"
+    accepted: "8/8"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- BATCH 2: Draft tokens 9-16 then verify
+-- ═══════════════════════════════════════════════════════════
+
+link VerifyModel <-> DraftModel priority high {
+  >> { quality: attending, priority: 0.88, confidence: 0.78, half_life: 200 }
+     "Batch 2: DraftModel generating tokens 9-16"
+
+  connect depth deep {
+    signal attending   0.82 between data "drafting tokens 9-16 continuing from verified batch"
+    signal recognizing 0.75 inward  data "building on accepted prefix"
+  }
+
+  VerifyModel ~ DraftModel until resonating
+
+  => when sync_level > 0.7 depth deep {
+    batch2_draft <- "the atmosphere and shorter blue wavelengths dominate our"
+    batch2_tokens <- "8"
+    batch2_draft_confidence <- "0.75"
+  }
+
+  * from apply {
+    stage: "draft"
+    batch: "2"
+    tokens: 8
+  }
+}
+
+link DraftModel <-> VerifyModel priority high {
+  >> { quality: recognizing, priority: 0.92, confidence: 0.85, half_life: 300 }
+     "Batch 2: VerifyModel checking draft tokens 9-16"
+
+  connect depth deep {
+    signal recognizing 0.88 between data "verifying draft batch 2"
+    signal attending   0.82 between data DraftModel.batch2_draft
+  }
+
+  DraftModel ~ VerifyModel until resonating
+
+  <= when confidence <= 0.4 data "Batch 2 rejected — draft quality too low"
+
+  => when sync_level > 0.7 depth deep {
+    batch2_accepted <- "true"
+    batch2_verified <- "the atmosphere and shorter blue wavelengths dominate our"
+    batch2_acceptance_rate <- "7/8"
+    batch2_verify_confidence <- "0.88"
+  }
+
+  * from apply {
+    stage: "verify"
+    batch: "2"
+    accepted: "7/8"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- BATCH 3: Draft tokens 17-24 then verify
+-- ═══════════════════════════════════════════════════════════
+
+link VerifyModel <-> DraftModel priority normal {
+  >> { quality: attending, priority: 0.82, confidence: 0.72, half_life: 200 }
+     "Batch 3: DraftModel generating tokens 17-24"
+
+  connect depth deep {
+    signal attending   0.78 between data "drafting final token batch"
+    signal questioning 0.6  inward  data "end of sequence approaching"
+  }
+
+  VerifyModel ~ DraftModel until resonating
+
+  => when sync_level > 0.7 depth deep {
+    batch3_draft <- "perception making the sky look blue to us"
+    batch3_tokens <- "8"
+    batch3_draft_confidence <- "0.7"
+  }
+
+  * from apply {
+    stage: "draft"
+    batch: "3"
+    tokens: 8
+  }
+}
+
+link DraftModel <-> VerifyModel priority normal {
+  >> { quality: recognizing, priority: 0.88, confidence: 0.82, half_life: 300 }
+     "Batch 3: VerifyModel checking final draft batch"
+
+  connect depth deep {
+    signal recognizing 0.85 between data "verifying final draft batch"
+    signal attending   0.8  between data DraftModel.batch3_draft
+  }
+
+  DraftModel ~ VerifyModel until resonating
+
+  <= when confidence <= 0.4 data "Batch 3 rejected — final tokens diverge"
+
+  => when sync_level > 0.7 depth deep {
+    batch3_accepted <- "true"
+    batch3_verified <- "perception making the sky look blue to us"
+    batch3_acceptance_rate <- "8/8"
+    batch3_verify_confidence <- "0.85"
+  }
+
+  * from apply {
+    stage: "verify"
+    batch: "3"
+    accepted: "8/8"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- COLLECT: Assemble output from verified batches
+-- ═══════════════════════════════════════════════════════════
+
+link VerifyModel <-> Output priority background {
+  >> { quality: recognizing, priority: 0.5, confidence: 0.9, half_life: 100 }
+     "Assembling final output from all verified batches"
+
+  connect depth full {
+    signal recognizing 0.7 between data "collecting all accepted tokens"
+  }
+
+  VerifyModel ~ Output until synchronized
+
+  => when sync_level > 0.3 depth deep {
+    text_batch1 <- VerifyModel.batch1_verified
+    text_batch2 <- VerifyModel.batch2_verified
+    text_batch3 <- VerifyModel.batch3_verified
+    total_drafted <- "24"
+    total_accepted <- "23"
+    overall_acceptance <- "95.8%"
+    speedup <- "2.4x vs sequential 70B generation"
+    final_text <- "The sky appears blue because sunlight scatters through the atmosphere and shorter blue wavelengths dominate our perception making the sky look blue to us"
+  }
+
+  * from apply {
+    stage: "output"
+    tokens: 23
+    acceptance: "95.8%"
+    speedup: "2.4x"
+  }
+}

@@ -1,0 +1,211 @@
+-- ─────────────────────────────────────────────────────────
+-- NETWORK TRANSPORT BRIDGE IN ANWE
+--
+-- Signal routing over TCP/gRPC/WebSocket.
+-- Agents on different machines communicate through ANWE's
+-- signal system as if they were local.
+--
+-- The bridge abstracts network transport:
+--   - Local agents see remote agents as regular participants
+--   - Signals are serialized, transmitted, deserialized
+--   - Network failures produce pending? not crashes
+--   - Reconnection is automatic with lineage preservation
+--
+-- What this proves about ANWE:
+--   - bridge keyword for network-transparent communication
+--   - Transport protocol is configurable (tcp, grpc, ws)
+--   - Network failures map to pending? (not-yet)
+--   - Remote agents participate in local supervision trees
+--
+-- BUILDSHEET items covered:
+--   [x] Network transport bridge (Language Features)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+-- Local inference gateway
+agent Gateway attention 0.9 data {
+  host: "gateway.ai.internal"
+  port: 8080
+  protocol: "grpc"
+  connections: 0
+}
+
+-- Remote model server (on different machine)
+agent RemoteModel attention 0.9 bridge("grpc", "model.ai.internal:9090") data {
+  model: "llm-70b"
+  gpu_count: 8
+  status: "ready"
+  location: "us-east-1"
+}
+
+-- Remote vector database (on different machine)
+agent RemoteVectorDB attention 0.7 bridge("tcp", "vectors.ai.internal:6333") data {
+  collection: "documents"
+  vectors: 5000000
+  dimensions: 1536
+  location: "us-east-1"
+}
+
+-- Remote cache (on different machine)
+agent RemoteCache attention 0.5 bridge("tcp", "cache.ai.internal:6379") data {
+  entries: 50000
+  hit_rate: 0.87
+  location: "us-east-1"
+}
+
+-- Local request handler
+agent RequestHandler data {
+  request_id: ""
+  query: ""
+  status: "idle"
+}
+
+-- Network health monitor
+agent NetworkMonitor data {
+  connections: []
+  latencies: []
+  failures: 0
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 10 within 60000 {
+  Gateway
+  RequestHandler
+  NetworkMonitor
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LINKS
+-- ═══════════════════════════════════════════════════════════
+
+-- Check cache first (remote, via TCP bridge)
+link RequestHandler <-> RemoteCache priority high {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.8, half_life: 100 }
+     "Checking remote cache via TCP bridge"
+
+  connect depth partial {
+    signal recognizing 0.8  between data "cache lookup"
+    signal attending   0.75 inward  data "checking key"
+  }
+
+  RequestHandler ~ RemoteCache until synchronized timeout 500 {
+    on_timeout: pending
+  }
+
+  if RemoteCache.hit_rate > 0.5 {
+    => when sync_level > 0.5 depth partial {
+      cache_hit <- "true"
+      cached_response <- "Previously computed answer for this query"
+      latency_ms <- 3
+      source <- "cache"
+    }
+  } else {
+    => when sync_level > 0.5 depth partial {
+      cache_hit <- "false"
+      proceed_to <- "retrieval"
+    }
+  }
+
+  * from apply {
+    stage: "cache_check"
+    transport: "tcp"
+    remote: "cache.ai.internal:6379"
+  }
+}
+
+-- Retrieve relevant docs (remote, via TCP bridge)
+link RequestHandler <-> RemoteVectorDB priority high {
+  >> { quality: attending, priority: 0.9, confidence: 0.85, half_life: 200 }
+     "Retrieving documents from remote vector DB via TCP"
+
+  connect depth full {
+    signal attending   0.85 between data "embedding query"
+    signal recognizing 0.8  inward  data "similarity search"
+  }
+
+  RequestHandler ~ RemoteVectorDB until synchronized timeout 2000 {
+    on_timeout: pending
+  }
+
+  => when sync_level > 0.6 depth deep {
+    docs_retrieved <- 5
+    top_score <- 0.94
+    avg_score <- 0.87
+    latency_ms <- 45
+  }
+
+  <= when confidence <= 0.3 data "vector DB unreachable — network failure"
+
+  * from apply {
+    stage: "retrieval"
+    transport: "tcp"
+    remote: "vectors.ai.internal:6333"
+  }
+}
+
+-- Generate response (remote, via gRPC bridge)
+link RequestHandler <-> RemoteModel priority high {
+  >> { quality: applying, priority: 0.95, confidence: 0.85, half_life: 300 }
+     "Generating response via remote model over gRPC"
+
+  connect depth deep {
+    signal applying    0.9  between data "inference request"
+    signal recognizing 0.85 inward  data "generating tokens"
+  }
+
+  RequestHandler ~ RemoteModel until synchronized timeout 30000 {
+    on_timeout: pending
+    retry: 2
+    retry_delay: 1000
+  }
+
+  => when sync_level > 0.7 depth deep {
+    response <- "Based on the retrieved documents, the answer is..."
+    tokens_generated <- 342
+    latency_ms <- 1200
+    gpu_utilization <- 0.78
+    model_used <- "llm-70b"
+  }
+
+  <= when confidence <= 0.2 data "model server unreachable — circuit breaker open"
+
+  * from apply {
+    stage: "generation"
+    transport: "grpc"
+    remote: "model.ai.internal:9090"
+  }
+}
+
+-- Monitor network health across all bridges
+link NetworkMonitor <-> Gateway priority low every 60 ticks {
+  >> { quality: attending, priority: 0.6, confidence: 0.95, half_life: 500 }
+     "Monitoring bridge connections"
+
+  connect depth partial {
+    signal attending 0.6 between data "connection health"
+  }
+
+  NetworkMonitor ~ Gateway until synchronized
+
+  => when sync_level > 0.5 depth partial {
+    grpc_latency_ms <- 12
+    tcp_vectordb_latency_ms <- 8
+    tcp_cache_latency_ms <- 2
+    all_bridges_healthy <- "true"
+    total_signals_routed <- 4500
+  }
+
+  * from apply {
+    stage: "network_health"
+    bridges: 3
+  }
+}

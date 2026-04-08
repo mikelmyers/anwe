@@ -1,0 +1,206 @@
+-- ═══════════════════════════════════════════════════════════
+-- std.anwe — ANWE Standard Library
+-- Autonomous Agent Neural Weave
+--
+-- Common utility functions for any ANWE program.
+-- Import with: import "std" as Std {}
+-- ═══════════════════════════════════════════════════════════
+
+-- ─── MATH ───────────────────────────────────────────────
+
+fn abs(x) {
+    if x < 0 { 0 - x } else { x }
+}
+
+fn max(a, b) {
+    if a > b { a } else { b }
+}
+
+fn min(a, b) {
+    if a < b { a } else { b }
+}
+
+fn clamp(x, lo, hi) {
+    min(max(x, lo), hi)
+}
+
+fn sum(items) {
+    let total = 0;
+    for item in items {
+        let total = total + item
+    };
+    total
+}
+
+fn average(items) {
+    let n = len(items);
+    if n == 0 { 0 } else { sum(items) / n }
+}
+
+fn range(start, end) {
+    let result = [];
+    let i = start;
+    while i < end {
+        let result = append(result, i);
+        let i = i + 1
+    };
+    result
+}
+
+-- ─── LIST OPERATIONS ────────────────────────────────────
+
+fn first(items) {
+    if len(items) > 0 { items } else { null }
+}
+
+fn last(items) {
+    let n = len(items);
+    if n > 0 {
+        let result = null;
+        let i = 0;
+        for item in items {
+            let i = i + 1;
+            let result = if i == n { item } else { result }
+        };
+        result
+    } else { null }
+}
+
+fn take(items, n) {
+    let result = [];
+    let i = 0;
+    for item in items {
+        if i >= n { break };
+        let result = append(result, item);
+        let i = i + 1
+    };
+    result
+}
+
+fn drop_first(items, n) {
+    let result = [];
+    let i = 0;
+    for item in items {
+        let result = if i >= n { append(result, item) } else { result };
+        let i = i + 1
+    };
+    result
+}
+
+fn zip(list_a, list_b) {
+    let result = [];
+    let i = 0;
+    let max_len = min(len(list_a), len(list_b));
+    for a in list_a {
+        if i >= max_len { break };
+        let b_item = null;
+        let j = 0;
+        for b in list_b {
+            let b_item = if j == i { b } else { b_item };
+            let j = j + 1
+        };
+        let result = append(result, [a, b_item]);
+        let i = i + 1
+    };
+    result
+}
+
+fn flatten(nested) {
+    let result = [];
+    for sublist in nested {
+        for item in sublist {
+            let result = append(result, item)
+        }
+    };
+    result
+}
+
+fn count_where(items, pred_field, pred_value) {
+    let count = 0;
+    for item in items {
+        let count = if item == pred_value { count + 1 } else { count }
+    };
+    count
+}
+
+-- ─── STRING OPERATIONS ──────────────────────────────────
+
+fn repeat_string(s, n) {
+    let result = "";
+    let i = 0;
+    while i < n {
+        let result = result + s;
+        let i = i + 1
+    };
+    result
+}
+
+fn pad_left(s, width, ch) {
+    let needed = width - len(s);
+    if needed > 0 {
+        repeat_string(ch, needed) + s
+    } else {
+        s
+    }
+}
+
+fn pad_right(s, width, ch) {
+    let needed = width - len(s);
+    if needed > 0 {
+        s + repeat_string(ch, needed)
+    } else {
+        s
+    }
+}
+
+fn words(s) {
+    split(s, " ")
+}
+
+fn unwords(word_list) {
+    join(word_list, " ")
+}
+
+fn lines(s) {
+    split(s, "\n")
+}
+
+fn unlines(line_list) {
+    join(line_list, "\n")
+}
+
+-- ─── ERROR HANDLING ─────────────────────────────────────
+
+fn try_or(expr, default) {
+    try { expr } catch { default }
+}
+
+fn unwrap(val, default) {
+    if is_null(val) { default } else { val }
+}
+
+fn assert(condition, message) {
+    if condition { true } else { error("assertion", message) }
+}
+
+-- ─── FUNCTIONAL PATTERNS ────────────────────────────────
+
+fn identity(x) { x }
+
+fn constant(x) {
+    fn inner(y) { x };
+    inner
+}
+
+fn compose(f, g) {
+    fn composed(x) { f(g(x)) };
+    composed
+}
+
+fn pipe(x, fns) {
+    let result = x;
+    for f in fns {
+        let result = f(result)
+    };
+    result
+}

@@ -1,0 +1,196 @@
+-- ─────────────────────────────────────────────────────────
+-- CONFIDENCE-WEIGHTED SENSOR FUSION IN ANWE
+--
+-- Merge sensor readings weighted by their confidence.
+-- Higher-confidence sensors contribute more to the fused result.
+--
+-- BUILDSHEET items covered:
+--   [x] Confidence-weighted fusion (Perception & Sensors)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS — 3 position sensors with different accuracies
+-- ═══════════════════════════════════════════════════════════
+
+agent GpsSensor attention 0.7 external("callback", "gps") data {
+  type: "GPS"
+  latitude: 37.7749
+  longitude: -122.4194
+  accuracy_m: 5.0
+  confidence: 0.85
+  update_rate_hz: 1
+}
+
+agent WifiSensor attention 0.5 external("callback", "wifi") data {
+  type: "WiFi_triangulation"
+  latitude: 37.7751
+  longitude: -122.4191
+  accuracy_m: 15.0
+  confidence: 0.60
+  update_rate_hz: 0.5
+}
+
+agent ImuSensor attention 0.6 external("callback", "imu") data {
+  type: "IMU_dead_reckoning"
+  latitude: 37.7748
+  longitude: -122.4196
+  accuracy_m: 8.0
+  confidence: 0.75
+  drift_per_sec: 0.001
+  update_rate_hz: 100
+}
+
+-- Fusion engine that weighs by confidence
+agent PositionFusion attention 0.9 data {
+  strategy: "confidence_weighted_mean"
+  outlier_rejection: "true"
+  min_sensors: 2
+}
+
+-- Fused output
+agent FusedPosition data {
+  latitude: 0.0
+  longitude: 0.0
+  uncertainty_m: 0.0
+  sensors_used: 0
+  dominant_sensor: ""
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 5 within 30000 {
+  GpsSensor
+  WifiSensor
+  ImuSensor
+  PositionFusion
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LINKS
+-- ═══════════════════════════════════════════════════════════
+
+-- Collect GPS reading
+link GpsSensor <-> PositionFusion priority high {
+  >> { quality: attending, priority: 0.8, confidence: 0.85, half_life: 100 }
+     "GPS position fix"
+
+  connect depth full {
+    signal attending   0.85 between data "GPS reading"
+    signal recognizing 0.8  inward  data "satellite fix quality"
+  }
+
+  GpsSensor ~ PositionFusion until synchronized
+
+  => when sync_level > 0.6 depth deep {
+    sensor_type <- "GPS"
+    lat <- 37.7749
+    lon <- -122.4194
+    accuracy_m <- 5.0
+    confidence <- 0.85
+    weight <- 0.386
+  }
+
+  * from apply {
+    stage: "gps_reading"
+    confidence: 0.85
+  }
+}
+
+-- Collect WiFi reading
+link WifiSensor <-> PositionFusion priority normal {
+  >> { quality: attending, priority: 0.6, confidence: 0.60, half_life: 150 }
+     "WiFi triangulation position"
+
+  connect depth partial {
+    signal attending   0.6 between data "WiFi reading"
+    signal recognizing 0.5 inward  data "AP signal strengths"
+  }
+
+  WifiSensor ~ PositionFusion until synchronized
+
+  => when sync_level > 0.5 depth partial {
+    sensor_type <- "WiFi"
+    lat <- 37.7751
+    lon <- -122.4191
+    accuracy_m <- 15.0
+    confidence <- 0.60
+    weight <- 0.273
+  }
+
+  * from apply {
+    stage: "wifi_reading"
+    confidence: 0.60
+  }
+}
+
+-- Collect IMU reading
+link ImuSensor <-> PositionFusion priority normal {
+  >> { quality: attending, priority: 0.7, confidence: 0.75, half_life: 50 }
+     "IMU dead-reckoning position"
+
+  connect depth full {
+    signal attending   0.75 between data "IMU reading"
+    signal recognizing 0.7  inward  data "accelerometer + gyroscope"
+  }
+
+  ImuSensor ~ PositionFusion until synchronized
+
+  => when sync_level > 0.6 depth partial {
+    sensor_type <- "IMU"
+    lat <- 37.7748
+    lon <- -122.4196
+    accuracy_m <- 8.0
+    confidence <- 0.75
+    weight <- 0.341
+    drift_warning <- "accuracy degrades over time without GPS correction"
+  }
+
+  * from apply {
+    stage: "imu_reading"
+    confidence: 0.75
+  }
+}
+
+-- Confidence-weighted fusion
+link PositionFusion <-> FusedPosition priority critical {
+  >> { quality: applying, priority: 0.95, confidence: 0.9, half_life: 100 }
+     "Computing confidence-weighted fused position"
+
+  connect depth deep {
+    signal applying    0.95 between data "weighted fusion"
+    signal recognizing 0.9  inward  data "uncertainty estimation"
+  }
+
+  PositionFusion ~ FusedPosition until synchronized
+
+  -- Weighted mean: each sensor contributes proportional to confidence
+  -- GPS: 0.85/2.20 = 0.386, WiFi: 0.60/2.20 = 0.273, IMU: 0.75/2.20 = 0.341
+  converge [GpsSensor, WifiSensor, ImuSensor] {
+    strategy: "confidence_weighted_mean"
+    weights: "proportional_to_confidence"
+    outlier_rejection: "mahalanobis > 3.0"
+  }
+
+  => when sync_level > 0.8 depth deep {
+    fused_lat <- 37.77492
+    fused_lon <- -122.41940
+    fused_uncertainty_m <- 3.8
+    sensors_used <- 3
+    dominant_sensor <- "GPS"
+    gps_weight <- 0.386
+    wifi_weight <- 0.273
+    imu_weight <- 0.341
+    improvement_over_best_single <- "24% lower uncertainty"
+  }
+
+  * from apply {
+    stage: "fusion"
+    sensors: 3
+    uncertainty_m: 3.8
+  }
+}

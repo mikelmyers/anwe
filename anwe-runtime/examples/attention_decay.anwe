@@ -1,0 +1,63 @@
+-- ─────────────────────────────────────────────────────────────
+-- attention_decay.anwe
+--
+-- Demonstrates attention as finite resource.
+-- When the mind's attention budget is exhausted,
+-- lower-priority thoughts decay — never processed.
+-- Not failure. The natural reality of finite cognition.
+-- ─────────────────────────────────────────────────────────────
+
+mind Focus attention 0.3 {
+
+  -- Critical: this MUST be processed
+  attend "crisis" priority 1.0 {
+    >> { quality: disturbed, priority: 1.0 }
+       "urgent signal detected"
+
+    think {
+      threat   <- "immediate threat identified"
+      action   <- "engage full resources"
+    }
+
+    connect depth deep {
+      signal attending 0.95 between
+      signal attending 0.90 between
+      signal attending 0.85 between
+    }
+
+    => when sync_level > 0.7 depth genuine {
+      response <- "crisis handled"
+    }
+
+    * from apply {
+      resolved: "yes"
+    }
+
+    express { quality: completing, priority: 0.95 }
+      "crisis resolved — attention heavily consumed"
+  }
+
+  -- Important but not critical
+  attend "analysis" priority 0.6 {
+    think {
+      analysis <- "secondary analysis of situation"
+    }
+    express "analysis complete"
+  }
+
+  -- Nice to have — will likely decay
+  attend "curiosity" priority 0.3 {
+    think {
+      wonder <- "what else is interesting nearby"
+    }
+    express "explored the periphery"
+  }
+
+  -- Background — almost certainly decays
+  attend "daydream" priority 0.05 {
+    think {
+      dream <- "what if everything were different"
+    }
+    express "imagined alternatives"
+  }
+}

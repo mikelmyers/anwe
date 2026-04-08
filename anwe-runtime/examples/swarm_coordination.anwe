@@ -1,0 +1,262 @@
+-- ─────────────────────────────────────────────────────────
+-- SWARM COORDINATION IN ANWE
+--
+-- Many simple agents, emergent collective behavior.
+-- No central controller — coordination emerges from
+-- local signal exchange between neighbors.
+--
+-- Like ants, like starlings, like neurons.
+-- Simple rules. Complex behavior.
+--
+-- BUILDSHEET items covered:
+--   [x] Swarm coordination (Distributed AI)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS — a swarm of 8 search agents
+-- ═══════════════════════════════════════════════════════════
+
+agent SwarmLeader attention 0.6 data {
+  task: "search_document_corpus"
+  corpus_size: 1000000
+  partition_count: 8
+  convergence_threshold: 0.85
+}
+
+agent Scout_1 attention 0.5 data {
+  partition: "0-125000"
+  found_relevant: 0
+  best_score: 0.0
+  status: "searching"
+  neighbors: ["Scout_2", "Scout_8"]
+}
+
+agent Scout_2 attention 0.5 data {
+  partition: "125001-250000"
+  found_relevant: 0
+  best_score: 0.0
+  status: "searching"
+  neighbors: ["Scout_1", "Scout_3"]
+}
+
+agent Scout_3 attention 0.5 data {
+  partition: "250001-375000"
+  found_relevant: 0
+  best_score: 0.0
+  status: "searching"
+  neighbors: ["Scout_2", "Scout_4"]
+}
+
+agent Scout_4 attention 0.5 data {
+  partition: "375001-500000"
+  found_relevant: 0
+  best_score: 0.0
+  status: "searching"
+  neighbors: ["Scout_3", "Scout_5"]
+}
+
+agent Scout_5 attention 0.5 data {
+  partition: "500001-625000"
+  found_relevant: 0
+  best_score: 0.0
+  status: "searching"
+  neighbors: ["Scout_4", "Scout_6"]
+}
+
+agent Scout_6 attention 0.5 data {
+  partition: "625001-750000"
+  found_relevant: 0
+  best_score: 0.0
+  status: "searching"
+  neighbors: ["Scout_5", "Scout_7"]
+}
+
+agent Scout_7 attention 0.5 data {
+  partition: "750001-875000"
+  found_relevant: 0
+  best_score: 0.0
+  status: "searching"
+  neighbors: ["Scout_6", "Scout_8"]
+}
+
+agent Scout_8 attention 0.5 data {
+  partition: "875001-1000000"
+  found_relevant: 0
+  best_score: 0.0
+  status: "searching"
+  neighbors: ["Scout_7", "Scout_1"]
+}
+
+-- Collective results
+agent SwarmResult data {
+  total_relevant: 0
+  best_documents: []
+  coverage_pct: 0.0
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 16 within 60000 {
+  Scout_1
+  Scout_2
+  Scout_3
+  Scout_4
+  Scout_5
+  Scout_6
+  Scout_7
+  Scout_8
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LINKS
+-- ═══════════════════════════════════════════════════════════
+
+-- Each scout searches its partition independently
+link Scout_1 <-> Scout_1 priority high {
+  >> { quality: attending, priority: 0.8, confidence: 0.9, half_life: 200 }
+     "Scout 1: searching partition 0-125K"
+
+  connect depth full {
+    signal attending 0.8 inward data "local search"
+  }
+
+  => when sync_level > 0.5 depth deep {
+    found_relevant <- 23
+    best_score <- 0.94
+    best_doc <- "doc_42891: quantum computing applications in drug discovery"
+    search_time_ms <- 450
+  }
+
+  * from apply {
+    stage: "local_search"
+    scout: 1
+  }
+}
+
+-- Neighbor gossip: Scout_1 shares findings with neighbors
+link Scout_1 <-> Scout_2 priority normal {
+  >> { quality: recognizing, priority: 0.6, confidence: 0.8, half_life: 100 }
+     "Scout 1 → Scout 2: sharing best findings with neighbor"
+
+  connect depth partial {
+    signal recognizing 0.6 between data "gossip: best result so far"
+  }
+
+  Scout_1 ~ Scout_2 until synchronized
+
+  -- Share best finding with neighbor
+  => when sync_level > 0.5 depth partial {
+    shared_best_score <- 0.94
+    shared_best_doc <- "doc_42891"
+    shared_from <- "scout_1"
+    neighbor_can_refine <- "true"
+  }
+
+  * from apply {
+    stage: "gossip"
+    from: 1
+    to: 2
+  }
+}
+
+-- When a scout finds something great, it broadcasts to all neighbors
+-- This is the "pheromone trail" effect
+link Scout_1 <-> Scout_8 priority normal {
+  >> { quality: recognizing, priority: 0.6, confidence: 0.8, half_life: 100 }
+     "Scout 1 → Scout 8: gossip propagation"
+
+  connect depth partial {
+    signal recognizing 0.6 between data "gossip: high-scoring document"
+  }
+
+  Scout_1 ~ Scout_8 until synchronized
+
+  => when sync_level > 0.5 depth partial {
+    shared_best_score <- 0.94
+    shared_from <- "scout_1"
+    propagation_hop <- 1
+  }
+
+  * from apply {
+    stage: "gossip"
+    from: 1
+    to: 8
+  }
+}
+
+-- Scouts 2-8 also search (simplified — same pattern)
+link Scout_2 <-> Scout_2 priority high {
+  >> { quality: attending, priority: 0.8, confidence: 0.9, half_life: 200 }
+     "Scout 2: searching partition 125K-250K"
+
+  connect depth full {
+    signal attending 0.8 inward data "local search"
+  }
+
+  => when sync_level > 0.5 depth deep {
+    found_relevant <- 18
+    best_score <- 0.87
+    best_doc <- "doc_198234: quantum error correction overview"
+  }
+
+  * from apply { stage: "local_search" scout: 2 }
+}
+
+link Scout_5 <-> Scout_5 priority high {
+  >> { quality: attending, priority: 0.8, confidence: 0.9, half_life: 200 }
+     "Scout 5: searching partition 500K-625K"
+
+  connect depth full {
+    signal attending 0.8 inward data "local search"
+  }
+
+  => when sync_level > 0.5 depth deep {
+    found_relevant <- 31
+    best_score <- 0.96
+    best_doc <- "doc_567102: quantum advantage proof for optimization"
+  }
+
+  * from apply { stage: "local_search" scout: 5 }
+}
+
+-- Collective convergence
+link SwarmLeader <-> SwarmResult priority high {
+  >> { quality: completing, priority: 0.9, confidence: 0.85, half_life: 300 }
+     "Collecting swarm results via convergence"
+
+  connect depth deep {
+    signal completing  0.9  between data "swarm convergence"
+    signal recognizing 0.85 inward  data "ranking collective findings"
+  }
+
+  SwarmLeader ~ SwarmResult until synchronized
+
+  converge [Scout_1, Scout_2, Scout_3, Scout_4, Scout_5, Scout_6, Scout_7, Scout_8] {
+    strategy: "top_k"
+    k: 10
+    rank_by: "best_score"
+  }
+
+  => when sync_level > 0.8 depth deep {
+    total_relevant <- 152
+    coverage_pct <- 100
+    top_1 <- "doc_567102 (score: 0.96) — quantum advantage proof"
+    top_2 <- "doc_42891 (score: 0.94) — quantum computing in drug discovery"
+    top_3 <- "doc_198234 (score: 0.87) — quantum error correction"
+    scouts_completed <- 8
+    gossip_rounds <- 3
+    search_time_total_ms <- 520
+    speedup_vs_sequential <- "7.2x"
+  }
+
+  * from apply {
+    stage: "swarm_complete"
+    total_relevant: 152
+    speedup: "7.2x"
+  }
+}

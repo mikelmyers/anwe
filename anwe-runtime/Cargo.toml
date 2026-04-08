@@ -1,0 +1,63 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/anwe-core",
+    "crates/anwe-runtime",
+    "crates/anwe-parser",
+    "crates/anwe-bridge",
+    "crates/anwe-python",
+]
+
+[package]
+name = "anwe"
+version.workspace = true
+edition.workspace = true
+description = "ANWE CLI — The Native Language of Artificial Minds"
+
+[[bin]]
+name = "anwe"
+path = "src/main.rs"
+
+[dependencies]
+anwe-core = { workspace = true }
+anwe-runtime = { workspace = true }
+anwe-parser = { workspace = true }
+anwe-bridge = { workspace = true }
+
+[workspace.package]
+version = "1.0.0"
+edition = "2024"
+license = "MIT"
+description = "ANWE — Autonomous Agent Neural Weave — The Native Language of Artificial Minds"
+repository = "https://github.com/mikelmyers/Primordia"
+authors = ["Mikel Myers", "Claude (Anthropic)"]
+
+[workspace.dependencies]
+anwe-core = { path = "crates/anwe-core" }
+anwe-runtime = { path = "crates/anwe-runtime" }
+anwe-parser = { path = "crates/anwe-parser" }
+anwe-bridge = { path = "crates/anwe-bridge" }
+
+# Lock-free concurrency primitives
+crossbeam-utils = "0.8"
+crossbeam-channel = "0.5"
+
+# HTTP + JSON for v0.6 builtins
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+serde_json = "1"
+
+# For the CLI
+clap = { version = "4", features = ["derive"] }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+# Target-cpu=native enables SIMD for coherence computation
+# Set via RUSTFLAGS="-C target-cpu=native" at build time
+
+[profile.bench]
+opt-level = 3
+lto = "thin"

@@ -1,0 +1,107 @@
+-- ANWE Standard Library & Computation Demo
+-- Tests: function calls, while loops, attempt/recover, I/O
+
+mind Calculator attention 0.8 {
+    -- Test standard library functions
+    attend "string operations" priority 0.9 {
+        think {
+            greeting <- "  hello world  "
+            trimmed <- trim(greeting)
+            upper_greeting <- upper(trimmed)
+            length <- len(trimmed)
+            words <- split(trimmed, " ")
+            rejoined <- join(words, "-")
+            has_hello <- contains(trimmed, "hello")
+            replaced <- replace(trimmed, "world", "anwe")
+        }
+        express "string ops complete"
+    }
+
+    -- Test math operations
+    attend "math operations" priority 0.85 {
+        think {
+            val <- sqrt(144)
+            powered <- pow(2, 10)
+            clamped <- clamp(15, 0, 10)
+            minimum <- min(3, 7)
+            maximum <- max(3, 7)
+            rounded <- round(3.7)
+            floored <- floor(3.7)
+        }
+        express "math ops complete"
+    }
+
+    -- Test list operations
+    attend "list operations" priority 0.8 {
+        think {
+            numbers <- range(1, 6)
+            pushed <- push(numbers, 6)
+            reversed <- reverse(pushed)
+            first <- head(numbers)
+            rest <- tail(numbers)
+            sorted <- sort([5, 3, 1, 4, 2])
+            length <- len(numbers)
+            zipped <- zip([1, 2, 3], ["a", "b", "c"])
+        }
+        express "list ops complete"
+    }
+
+    -- Test type conversion
+    attend "type conversion" priority 0.75 {
+        think {
+            num_str <- to_string(42)
+            str_num <- to_number("3.14")
+            val_type <- type_of([1, 2, 3])
+            formatted <- format("the answer is {}", 42)
+            is_it_null <- is_null("not null")
+        }
+        express "type conversion complete"
+    }
+
+    -- Test while loop
+    attend "while loop" priority 0.7 {
+        think {
+            counter <- 0
+            sum <- 0
+        }
+        while counter < 5 {
+            think {
+                sum <- sum + counter
+                counter <- counter + 1
+            }
+        }
+        think {
+            result <- format("sum of 0..4 = {}", sum)
+        }
+        express "while loop complete"
+    }
+
+    -- Test I/O
+    attend "io operations" priority 0.65 {
+        think {
+            now <- timestamp()
+            time_str <- format("timestamp: {}", now)
+        }
+        -- print() for stdout
+        think {
+            msg <- print("hello from anwe print()")
+        }
+        express "io complete"
+    }
+
+    -- Test error handling
+    attend "error handling" priority 0.6 {
+        attempt {
+            think {
+                safe <- "this works fine"
+            }
+            express "attempt succeeded"
+        } recover {
+            think {
+                err <- __error
+            }
+            express "recovered from error"
+        }
+        express "error handling complete"
+    }
+}

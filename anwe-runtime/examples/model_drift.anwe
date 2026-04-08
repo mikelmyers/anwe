@@ -1,0 +1,204 @@
+-- ─────────────────────────────────────────────────────────
+-- MODEL DRIFT DETECTION IN ANWE
+--
+-- Compare current model performance against a decaying baseline.
+-- If performance drops below threshold, flag drift.
+--
+-- ANWE's half_life is native drift:
+--   - Baseline decays naturally (old baselines become less relevant)
+--   - Current metrics have shorter half_life (more recent)
+--   - When gap exceeds threshold, reject flags drift
+--
+-- What this proves about ANWE:
+--   - Half_life as baseline decay (not sliding windows)
+--   - Confidence comparison across time periods
+--   - Reject as drift alert
+--   - Background monitoring with escalation
+--
+-- BUILDSHEET items covered:
+--   [x] Model drift detection (Monitoring & Ops)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+-- The model being monitored
+agent Model attention 0.7 external("callback", "model") data {
+  name: "fraud-detector-v3"
+  deployed: "2024-01-15"
+}
+
+-- Baseline from deployment time (long half_life: slow decay)
+agent Baseline attention 0.3 data {
+  accuracy: "0.94"
+  precision: "0.91"
+  recall: "0.89"
+  f1: "0.90"
+  measured_at: "2024-01-15"
+}
+
+-- Current performance window
+agent CurrentMetrics attention 0.6 data {
+  window: "last_7_days"
+}
+
+-- Drift analyzer
+agent DriftAnalyzer attention 0.8 data {
+  method: "threshold_comparison"
+  drift_threshold: "0.05"
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 2 within 15000 {
+  permanent Model
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- WEEK 1: Evaluate current performance (no drift)
+--
+-- Baseline has long half_life (1000): decays slowly.
+-- Current metrics have short half_life (200): recent only.
+-- ═══════════════════════════════════════════════════════════
+
+link Model <-> CurrentMetrics priority normal {
+  >> { quality: recognizing, priority: 0.8, confidence: 0.9, half_life: 200 }
+     "Week 1: evaluating current model performance"
+
+  connect depth deep {
+    signal recognizing 0.9  between data "running evaluation on recent data"
+    signal attending   0.85 between data "computing accuracy, precision, recall"
+  }
+
+  Model ~ CurrentMetrics until resonating
+
+  => when sync_level > 0.7 depth deep {
+    week1_accuracy <- "0.93"
+    week1_precision <- "0.90"
+    week1_recall <- "0.88"
+    week1_f1 <- "0.89"
+    week1_drift_from_baseline <- "0.01"
+    week1_assessment <- "within normal range"
+  }
+
+  * from apply {
+    stage: "evaluation"
+    week: "1"
+    drift: "0.01"
+    status: "normal"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- WEEK 4: Performance starting to degrade
+-- ═══════════════════════════════════════════════════════════
+
+link Model <-> CurrentMetrics priority normal {
+  >> { quality: recognizing, priority: 0.8, confidence: 0.85, half_life: 200 }
+     "Week 4: re-evaluating model performance"
+
+  connect depth deep {
+    signal recognizing 0.85 between data "running evaluation on recent data"
+    signal questioning 0.6  inward  data "accuracy has dropped slightly"
+  }
+
+  Model ~ CurrentMetrics until resonating
+
+  => when sync_level > 0.7 depth deep {
+    week4_accuracy <- "0.90"
+    week4_precision <- "0.87"
+    week4_recall <- "0.85"
+    week4_f1 <- "0.86"
+    week4_drift_from_baseline <- "0.04"
+    week4_assessment <- "approaching drift threshold"
+  }
+
+  * from apply {
+    stage: "evaluation"
+    week: "4"
+    drift: "0.04"
+    status: "warning"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- WEEK 8: Significant drift detected
+-- ═══════════════════════════════════════════════════════════
+
+link Model <-> CurrentMetrics priority high {
+  >> { quality: disturbed, priority: 0.9, confidence: 0.8, half_life: 200 }
+     "Week 8: performance has degraded significantly"
+
+  connect depth deep {
+    signal disturbed   0.8  between data "model performance degrading"
+    signal questioning 0.75 inward  data "data distribution may have shifted"
+    signal attending   0.7  between data "measuring all metrics"
+  }
+
+  Model ~ CurrentMetrics until resonating
+
+  => when sync_level > 0.7 depth deep {
+    week8_accuracy <- "0.86"
+    week8_precision <- "0.82"
+    week8_recall <- "0.79"
+    week8_f1 <- "0.80"
+    week8_drift_from_baseline <- "0.10"
+    week8_assessment <- "DRIFT DETECTED — exceeds threshold"
+  }
+
+  * from apply {
+    stage: "evaluation"
+    week: "8"
+    drift: "0.10"
+    status: "drift_detected"
+  }
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- DRIFT ANALYSIS: Compare against baseline
+-- ═══════════════════════════════════════════════════════════
+
+link CurrentMetrics <-> DriftAnalyzer priority high {
+  >> { quality: questioning, priority: 0.85, confidence: 0.8, half_life: 300 }
+     "Analyzing drift pattern across weeks"
+
+  connect depth deep {
+    signal questioning 0.85 inward  data "comparing current metrics to baseline"
+    signal recognizing 0.8  between data "computing drift rate and trend"
+  }
+
+  CurrentMetrics ~ DriftAnalyzer until resonating
+
+  -- Reject: drift too severe, model needs retraining
+  <= when confidence <= 0.3 data "CRITICAL DRIFT: model must be retrained immediately"
+
+  => when sync_level > 0.7 depth deep {
+    baseline_f1 <- "0.90"
+    current_f1 <- CurrentMetrics.week8_f1
+    drift_magnitude <- "0.10"
+    drift_rate <- "0.0125 per week"
+    trend <- "accelerating"
+    weeks_to_critical <- "4"
+    root_cause_hypothesis <- "input data distribution shift — new fraud patterns not in training data"
+    recommendation <- "retrain with last 4 weeks of data, monitor weekly"
+    week1_drift <- CurrentMetrics.week1_drift_from_baseline
+    week4_drift <- CurrentMetrics.week4_drift_from_baseline
+    week8_drift <- CurrentMetrics.week8_drift_from_baseline
+  }
+
+  * from apply {
+    stage: "analysis"
+    drift_detected: "true"
+    magnitude: "0.10"
+    recommendation: "retrain"
+  }
+}

@@ -1,0 +1,11 @@
+-- string_utils.anwe -- reusable string utility module
+
+fn shout(s) = upper(s)
+
+fn whisper(s) = lower(s)
+
+fn greet(name) = "Hello, " + name + "!"
+
+fn exclaim(s) = s + "!!!"
+
+let version = "1.0"

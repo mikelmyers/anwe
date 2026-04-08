@@ -1,0 +1,29 @@
+-- ANWE Import Demo
+-- Tests the module system by importing math_utils
+
+import "math_utils" as Math {
+    agents: [Adder, Multiplier]
+    links: []
+}
+
+agent Calculator attention 0.9
+
+link Calculator <-> Math.Adder {
+    >> { quality: attending, priority: 0.8 }
+       "requesting addition"
+
+    connect depth surface {
+        signal attending 0.7 between
+    }
+
+    Calculator ~ Math.Adder until synchronized
+
+    => when sync_level > 0.5 {
+        result <- "2 + 3 = 5"
+    }
+
+    * from apply {
+        computation: "addition"
+        verified: true
+    }
+}

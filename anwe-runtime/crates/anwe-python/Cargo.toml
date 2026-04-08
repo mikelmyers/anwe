@@ -1,0 +1,14 @@
+[package]
+name = "anwe-python"
+version.workspace = true
+edition.workspace = true
+description = "ANWE Python bindings — lets Python implement the Participant protocol"
+
+[lib]
+name = "anwe_python"
+crate-type = ["cdylib"]
+
+[dependencies]
+anwe-core = { workspace = true }
+anwe-bridge = { workspace = true }
+pyo3 = { version = "0.23", features = ["extension-module"] }

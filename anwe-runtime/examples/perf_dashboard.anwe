@@ -1,0 +1,133 @@
+-- PERFORMANCE DASHBOARD IN ANWE
+-- Collect metrics from multiple models, aggregate, display.
+
+agent MetricsCollector data {
+  models: ["model_a", "model_b", "model_c"]
+}
+
+agent ModelA external("callback", "model_a_metrics") data {
+  latency_p50: 45
+  latency_p99: 120
+  throughput: 150
+  error_rate: 0.02
+}
+
+agent ModelB external("callback", "model_b_metrics") data {
+  latency_p50: 80
+  latency_p99: 250
+  throughput: 85
+  error_rate: 0.05
+}
+
+agent Aggregator data {
+  total_throughput: 0
+  avg_latency: 0
+  max_error_rate: 0
+}
+
+agent Dashboard data {
+  status: "initializing"
+}
+
+link MetricsCollector <-> ModelA priority high {
+  >> { quality: attending, priority: 0.9, confidence: 0.95, half_life: 200 }
+     "Collecting metrics from Model A"
+
+  connect depth full {
+    signal attending   0.85 between data "metrics request"
+    signal recognizing 0.8  inward  data "metrics available"
+  }
+
+  MetricsCollector ~ ModelA until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    model_a_latency <- 45
+    model_a_throughput <- 150
+    model_a_errors <- 0.02
+    model_a_status <- "healthy"
+  }
+
+  * from apply {
+    stage: "collection"
+    model: "model_a"
+  }
+}
+
+link MetricsCollector <-> ModelB priority high {
+  >> { quality: attending, priority: 0.9, confidence: 0.9, half_life: 200 }
+     "Collecting metrics from Model B"
+
+  connect depth full {
+    signal attending   0.85 between data "metrics request"
+    signal recognizing 0.8  inward  data "metrics available"
+  }
+
+  MetricsCollector ~ ModelB until synchronized
+
+  => when sync_level > 0.7 depth deep {
+    model_b_latency <- 80
+    model_b_throughput <- 85
+    model_b_errors <- 0.05
+    model_b_status <- "degraded"
+  }
+
+  * from apply {
+    stage: "collection"
+    model: "model_b"
+  }
+}
+
+link ModelA <-> Aggregator priority normal {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.9, half_life: 300 }
+     "Aggregating metrics"
+
+  connect depth deep {
+    signal recognizing 0.9 between data "computing aggregates"
+  }
+
+  ModelA ~ Aggregator until synchronized
+
+  converge ModelA <<>> Aggregator {
+    >> { quality: recognizing, priority: 0.8 }
+       ModelB.model_b_throughput
+  }
+
+  => when sync_level > 0.7 depth deep {
+    total_throughput <- 235
+    avg_latency_p50 <- 62
+    max_error_rate <- 0.05
+    healthy_models <- 1
+    degraded_models <- 1
+  }
+
+  * from apply {
+    stage: "aggregation"
+  }
+}
+
+link Aggregator <-> Dashboard priority normal {
+  >> { quality: recognizing, priority: 0.85, confidence: 0.9, half_life: 300 }
+     "Updating dashboard"
+
+  connect depth deep {
+    signal recognizing 0.9  between data "dashboard update"
+    signal attending   0.85 inward  data "rendering metrics"
+  }
+
+  Aggregator ~ Dashboard until synchronized
+
+  if confidence > 0.5 {
+    => when sync_level > 0.7 depth deep {
+      dashboard_status <- "live"
+      total_requests_per_sec <- 235
+      avg_latency <- 62
+      error_budget_remaining <- 0.03
+      alert_level <- "warning"
+    }
+  }
+
+  * from apply {
+    stage: "dashboard"
+    status: "updated"
+  }
+}

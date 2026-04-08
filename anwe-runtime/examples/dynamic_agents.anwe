@@ -1,0 +1,237 @@
+-- ─────────────────────────────────────────────────────────
+-- DYNAMIC AGENT CREATION IN ANWE
+--
+-- Spawn agents at runtime based on workload.
+-- Auto-scaling: when attention budgets are exhausted,
+-- the supervisor spawns additional workers.
+--
+-- This is the foundation of elastic AI systems:
+--   - Worker pool that grows with demand
+--   - Each spawned agent has its own attention budget
+--   - Supervision tree manages lifecycle
+--   - Agents can be retired when load drops
+--
+-- What this proves about ANWE:
+--   - Agents can be created at runtime, not just declaration
+--   - spawn keyword creates agents from templates
+--   - Supervision extends to dynamically created agents
+--   - Attention budgets enforce backpressure naturally
+--
+-- BUILDSHEET items covered:
+--   [x] Dynamic agent creation (Language Features)
+--   [x] Auto-scaling (Monitoring & Ops)
+-- ─────────────────────────────────────────────────────────
+
+
+-- ═══════════════════════════════════════════════════════════
+-- AGENTS
+-- ═══════════════════════════════════════════════════════════
+
+-- The load balancer that decides when to scale
+agent LoadBalancer attention 0.9 data {
+  current_workers: 2
+  max_workers: 8
+  requests_pending: 0
+  scale_up_threshold: 10
+  scale_down_threshold: 2
+}
+
+-- Worker template — new workers are spawned from this
+agent WorkerTemplate attention 0.7 external("callback", "inference") data {
+  model: "llm-v3"
+  max_concurrent: 5
+  status: "template"
+}
+
+-- Initial worker pool
+agent Worker_1 attention 0.7 external("callback", "inference") data {
+  model: "llm-v3"
+  requests_handled: 0
+  status: "active"
+}
+
+agent Worker_2 attention 0.7 external("callback", "inference") data {
+  model: "llm-v3"
+  requests_handled: 0
+  status: "active"
+}
+
+-- Request queue
+agent RequestQueue data {
+  pending: ["req_001", "req_002", "req_003", "req_004", "req_005",
+            "req_006", "req_007", "req_008", "req_009", "req_010",
+            "req_011", "req_012", "req_013", "req_014", "req_015"]
+  total: 15
+}
+
+-- Metrics collector
+agent ScaleMetrics data {
+  scale_events: []
+  peak_workers: 2
+  total_spawned: 0
+  total_retired: 0
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- SUPERVISION
+-- ═══════════════════════════════════════════════════════════
+
+supervise one_for_one max_restarts 10 within 60000 {
+  LoadBalancer
+  Worker_1
+  Worker_2
+}
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LINKS
+-- ═══════════════════════════════════════════════════════════
+
+-- Monitor load and decide scaling
+link RequestQueue <-> LoadBalancer priority high {
+  >> { quality: attending, priority: 0.95, confidence: 0.9, half_life: 100 }
+     "Monitoring request queue depth for scaling decisions"
+
+  connect depth full {
+    signal attending   0.9 between data "queue depth monitoring"
+    signal recognizing 0.8 inward  data "capacity assessment"
+  }
+
+  RequestQueue ~ LoadBalancer until synchronized
+
+  => when sync_level > 0.6 depth deep {
+    pending_count <- 15
+    current_capacity <- 10
+    utilization <- 1.0
+    decision <- "scale_up"
+  }
+
+  * from apply {
+    stage: "load_assessment"
+    pending: 15
+    capacity: 10
+  }
+}
+
+-- Scale up: spawn new workers dynamically
+link LoadBalancer <-> WorkerTemplate priority critical {
+  >> { quality: applying, priority: 0.98, confidence: 0.85, half_life: 50 }
+     "Spawning additional workers to handle load"
+
+  connect depth deep {
+    signal applying    0.95 between data "scaling up"
+    signal recognizing 0.9  inward  data "spawning from template"
+  }
+
+  LoadBalancer ~ WorkerTemplate until synchronized
+
+  -- Spawn 3 new workers to handle the burst
+  spawn Worker_3 from WorkerTemplate {
+    status: "active"
+    spawned_at: "tick_1"
+    reason: "load_exceeded_threshold"
+  }
+
+  spawn Worker_4 from WorkerTemplate {
+    status: "active"
+    spawned_at: "tick_1"
+    reason: "load_exceeded_threshold"
+  }
+
+  spawn Worker_5 from WorkerTemplate {
+    status: "active"
+    spawned_at: "tick_1"
+    reason: "load_exceeded_threshold"
+  }
+
+  => when sync_level > 0.8 depth deep {
+    workers_spawned <- 3
+    new_total <- 5
+    new_capacity <- 25
+    headroom <- 10
+  }
+
+  * from apply {
+    stage: "scale_up"
+    spawned: 3
+    total_workers: 5
+  }
+}
+
+-- Distribute requests across all workers (including dynamically spawned)
+link LoadBalancer <-> Worker_1 priority high {
+  >> { quality: applying, priority: 0.9, confidence: 0.9, half_life: 150 }
+     "Distributing requests to worker pool"
+
+  connect depth full {
+    signal applying 0.85 between data "request distribution"
+  }
+
+  LoadBalancer ~ Worker_1 until synchronized
+
+  each request in RequestQueue.pending {
+    => when sync_level > 0.5 depth partial {
+      assigned_request <- request
+      assigned_to <- "round_robin"
+    }
+
+    * from apply {
+      stage: "dispatch"
+    }
+  }
+
+  => when sync_level > 0.7 depth deep {
+    all_dispatched <- "true"
+    requests_distributed <- 15
+    workers_utilized <- 5
+    avg_per_worker <- 3
+  }
+
+  * from apply {
+    stage: "distribution_complete"
+  }
+}
+
+-- Scale down when load drops
+link LoadBalancer <-> ScaleMetrics priority low {
+  >> { quality: completing, priority: 0.6, confidence: 0.9, half_life: 500 }
+     "Recording scaling decisions and checking for scale-down"
+
+  connect depth partial {
+    signal completing 0.7 between data "scaling metrics"
+    signal attending  0.6 inward  data "cooldown check"
+  }
+
+  LoadBalancer ~ ScaleMetrics until synchronized
+
+  if LoadBalancer.requests_pending < LoadBalancer.scale_down_threshold {
+    -- Retire excess workers
+    retire Worker_4 {
+      reason: "load_below_threshold"
+      requests_completed: 3
+    }
+
+    retire Worker_5 {
+      reason: "load_below_threshold"
+      requests_completed: 3
+    }
+
+    => when sync_level > 0.5 depth partial {
+      retired_count <- 2
+      remaining_workers <- 3
+      scale_down_reason <- "load_normalized"
+    }
+  } else {
+    => when sync_level > 0.5 depth partial {
+      scale_action <- "maintain"
+      current_workers <- 5
+    }
+  }
+
+  * from apply {
+    stage: "scale_metrics"
+    peak: 5
+    current: 3
+  }
+}

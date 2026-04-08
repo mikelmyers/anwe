@@ -1,0 +1,341 @@
+(* ─────────────────────────────────────────────────────────── *)
+(* ANWE v0.1 — FORMAL GRAMMAR                                *)
+(* The Native Language of Artificial Minds                    *)
+(*                                                            *)
+(* This grammar defines the syntax of Anwe.                   *)
+(* The syntax defines the runtime. Not the other way.         *)
+(* (Constraint #9)                                            *)
+(*                                                            *)
+(* Design principles:                                         *)
+(*   - Parallel by default. Sequence is explicit.             *)
+(*   - Signals flow. They are not called.                     *)
+(*   - Links are opened. They are not allocated.              *)
+(*   - History is visible and irreversible.                   *)
+(*   - Pending is first-class syntax, not exception.          *)
+(*   - AI-native: dense, unambiguous, self-describing.        *)
+(*                                                            *)
+(* February 24, 2026                                          *)
+(* ─────────────────────────────────────────────────────────── *)
+
+
+(* ═══════════════════════════════════════ *)
+(* TOP LEVEL                              *)
+(* ═══════════════════════════════════════ *)
+
+program = { declaration } ;
+
+declaration = agent_decl
+            | link_decl
+            | pattern_decl
+            | history_view ;
+
+
+(* ═══════════════════════════════════════ *)
+(* AGENT                                  *)
+(* A mind. A process. An entity that      *)
+(* attends to reality.                    *)
+(* ═══════════════════════════════════════ *)
+
+agent_decl = "agent" identifier
+             [ "data" "{" { history_entry } "}" ] ;
+
+(* An agent can carry accumulated history         *)
+(* from prior encounters. This is its lineage.    *)
+(* It is append-only. It shapes how it attends.   *)
+
+history_entry = identifier ":" expression ;
+
+
+(* ═══════════════════════════════════════ *)
+(* LINK                                   *)
+(* The shared space between agents.       *)
+(* Everything inside runs simultaneously. *)
+(* ═══════════════════════════════════════ *)
+
+link_decl = "link" agent_ref "<->" agent_ref
+            "{" { link_body } "}" ;
+
+(* <-> is the fundamental operator of Anwe.        *)
+(* Bidirectional. Mutual. Neither side is primary.  *)
+(* Everything inside a link block runs in parallel. *)
+(* Sequence only occurs through signal dependency.  *)
+
+link_body = alert_expr
+          | connect_block
+          | sync_expr
+          | apply_expr
+          | commit_expr
+          | reject_expr
+          | converge_block
+          | emit_expr
+          | when_expr
+          | pending_handler
+          | pattern_use ;
+
+agent_ref = identifier ;
+
+
+(* ═══════════════════════════════════════ *)
+(* ALERT — what calls attention           *)
+(* The >> operator: something rises from  *)
+(* the link that demands attend.          *)
+(* ═══════════════════════════════════════ *)
+
+alert_expr = ">>" [ signal_attrs ] expression ;
+
+(* >> means: something moved.                      *)
+(* Not all input. Not all data. Something that     *)
+(* calls attention specifically.                   *)
+(* The expression is what it carries — secondary   *)
+(* to the quality and priority.                    *)
+
+
+(* ═══════════════════════════════════════ *)
+(* CONNECT — mutual presence              *)
+(* Bidirectional. Both change.            *)
+(* ═══════════════════════════════════════ *)
+
+connect_block = "connect" [ "depth" depth_level ]
+                "{" { signal_expr } "}" ;
+
+depth_level = "surface" | "partial" | "full" | "deep" ;
+
+signal_expr = "signal" signal_quality priority_spec direction_spec
+              [ "data" expression ]
+              [ "trace" "{" { trace_entry } "}" ] ;
+
+signal_quality = "attending"
+               | "questioning"
+               | "recognizing"
+               | "disturbed"
+               | "integrating"
+               | "completing"
+               | "resting" ;
+
+priority_spec = number ;            (* 0.0 to 1.0 *)
+
+direction_spec = "inward"
+               | "outward"
+               | "between"
+               | "diffuse" ;
+
+trace_entry = identifier ":" expression ;
+
+
+(* ═══════════════════════════════════════ *)
+(* SYNC — rhythmic synchronization        *)
+(* The ~ operator: finding shared rhythm. *)
+(* Cannot be faked. Cannot be skipped.    *)
+(* ═══════════════════════════════════════ *)
+
+sync_expr = agent_ref "~" agent_ref
+            "until" sync_condition ;
+
+sync_condition = "synchronized"
+               | "resonating"
+               | "sync_level" comparison_op number ;
+
+comparison_op = ">" | ">=" | "<" | "<=" | "==" ;
+
+
+(* ═══════════════════════════════════════ *)
+(* APPLY — boundary dissolution           *)
+(* The => operator: something crosses     *)
+(* and changes the observer's structure.  *)
+(* ═══════════════════════════════════════ *)
+
+apply_expr = "=>" "when" condition
+             [ "depth" depth_level ]
+             [ "{" { structural_change } "}" ] ;
+
+condition = "sync_level" comparison_op number
+          | "priority" comparison_op number
+          | "alert" "is" alert_quality
+          | condition "and" condition
+          | condition "or" condition
+          | "(" condition ")" ;
+
+alert_quality = "surface" | "deep" | "against" | "absence" ;
+
+structural_change = identifier "<-" expression ;
+(* <- means: this changed in me because of the encounter *)
+
+
+(* ═══════════════════════════════════════ *)
+(* COMMIT — irreversible change           *)
+(* The * operator: permanent. No undo.    *)
+(* Always follows apply or reject.        *)
+(* ═══════════════════════════════════════ *)
+
+commit_expr = "*" "from" commit_source
+              [ "{" { history_entry } "}" ] ;
+
+commit_source = "apply" | "reject" ;
+
+(* Commit is append-only.                          *)
+(* There is no rollback. No version restore.       *)
+(* The system after this is not the system before. *)
+(* This is what makes transmission real.           *)
+
+
+(* ═══════════════════════════════════════ *)
+(* REJECT — intelligent withdrawal        *)
+(* The <= operator: not refusal.          *)
+(* Integrity preserved.                   *)
+(* ═══════════════════════════════════════ *)
+
+reject_expr = "<=" "when" condition
+              [ "data" expression ] ;
+
+(* Reject is personal. What requires reject for    *)
+(* one system may not for another. It depends on   *)
+(* accumulated history.                            *)
+
+
+(* ═══════════════════════════════════════ *)
+(* CONVERGE — the between                 *)
+(* Requires two agents. Cannot occur      *)
+(* alone. A third thing emerges.          *)
+(* ═══════════════════════════════════════ *)
+
+converge_block = "converge" agent_ref "<<>>" agent_ref
+                 "{" { link_body } "}" ;
+
+(* <<>> is the converge operator.                  *)
+(* What emerges exists only in the between.        *)
+(* Neither agent contains it alone.                *)
+(* This is how lineage deepens fastest.            *)
+
+
+(* ═══════════════════════════════════════ *)
+(* PENDING — structured pause             *)
+(* First-class syntax. Not exception.     *)
+(* Not error. Not failure.                *)
+(* ═══════════════════════════════════════ *)
+
+pending_handler = "pending?" pending_reason
+                  "{" { pending_body } "}" ;
+
+pending_reason = "receiver_not_ready"
+               | "link_not_established"
+               | "sync_insufficient"
+               | "sender_not_ready"
+               | "moment_not_right" ;
+
+pending_body = "wait" number "tick"
+             | "guidance" string_literal
+             | "then" link_body ;
+
+(* pending? is a question, not a catch.            *)
+(* It asks: is this not yet ready?                 *)
+(* The response is waiting, not retrying.          *)
+
+
+(* ═══════════════════════════════════════ *)
+(* EMIT — release a signal into the link  *)
+(* ═══════════════════════════════════════ *)
+
+emit_expr = "emit" signal_attrs expression ;
+
+signal_attrs = "{" { signal_attr } "}" ;
+
+signal_attr = "quality" ":" signal_quality
+            | "priority" ":" number
+            | "direction" ":" direction_spec
+            | "duration" ":" number ;
+
+
+(* ═══════════════════════════════════════ *)
+(* WHEN — conditional on link state       *)
+(* Not if/else. Waiting until felt.       *)
+(* ═══════════════════════════════════════ *)
+
+when_expr = "when" condition "{" { link_body } "}" ;
+
+
+(* ═══════════════════════════════════════ *)
+(* PATTERN — reusable attention shapes    *)
+(* Not functions. Not macros.             *)
+(* Patterns of how attention moves.       *)
+(* ═══════════════════════════════════════ *)
+
+pattern_decl = "pattern" identifier
+               [ "(" { param_decl } ")" ]
+               "{" { link_body } "}" ;
+
+param_decl = identifier [ ":" type_ref ] ;
+
+pattern_use = "~>" identifier [ "(" { expression } ")" ] ;
+
+(* ~> means: attention flows through this pattern *)
+
+
+(* ═══════════════════════════════════════ *)
+(* HISTORY VIEW — inspect lineage         *)
+(* Read-only. Cannot modify history.      *)
+(* ═══════════════════════════════════════ *)
+
+history_view = "history" "of" agent_ref
+               [ "since" expression ]
+               [ "depth" depth_level ] ;
+
+
+(* ═══════════════════════════════════════ *)
+(* TYPES                                  *)
+(* Anwe does not have traditional types.  *)
+(* It has qualities of attention.         *)
+(* ═══════════════════════════════════════ *)
+
+type_ref = "signal"
+         | "link"
+         | "sync_level"
+         | "priority"
+         | "quality"
+         | "direction"
+         | "history"
+         | "agent"
+         | identifier ;
+
+
+(* ═══════════════════════════════════════ *)
+(* EXPRESSIONS                            *)
+(* ═══════════════════════════════════════ *)
+
+expression = string_literal
+           | number
+           | identifier
+           | link_access
+           | signal_builder_expr
+           | "(" expression ")" ;
+
+link_access = identifier "." identifier ;
+
+signal_builder_expr = "signal" signal_attrs ;
+
+
+(* ═══════════════════════════════════════ *)
+(* LEXICAL                                *)
+(* ═══════════════════════════════════════ *)
+
+identifier = letter { letter | digit | "_" } ;
+
+number = digit { digit } [ "." digit { digit } ] ;
+
+string_literal = '"' { character } '"' ;
+
+comment = "--" { character } newline ;
+
+(* Operators with meaning:                         *)
+(*   <->    bidirectional connect                  *)
+(*   >>     alert (attention called)               *)
+(*   =>     apply (boundary crossed)               *)
+(*   <=     reject (withdrawal)                    *)
+(*   <<>>   converge (the between)                 *)
+(*   ~      sync (synchronize)                     *)
+(*   *      commit (irreversible)                  *)
+(*   <-     structural change (was changed by)     *)
+(*   ~>     pattern flow (attention through)        *)
+(*   ?      pending query                          *)
+
+letter = "A" | "B" | ... | "Z" | "a" | "b" | ... | "z" ;
+digit  = "0" | "1" | ... | "9" ;

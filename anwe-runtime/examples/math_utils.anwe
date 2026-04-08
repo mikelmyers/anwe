@@ -1,0 +1,18 @@
+-- math_utils.anwe — a reusable module
+-- Provides agents that perform mathematical operations.
+
+agent Adder attention 0.8 data {
+    operation: "add"
+}
+
+agent Multiplier attention 0.8 data {
+    operation: "multiply"
+}
+
+pattern compute(partner) {
+    >> { quality: attending, priority: 0.8 }
+       "computation requested"
+    connect depth surface {
+        signal attending 0.7 between
+    }
+}
