@@ -6479,6 +6479,10 @@ mod tests {
         Ok(engine)
     }
 
+    fn escape_anwe_string_literal(raw: &str) -> String {
+        raw.replace('\\', "\\\\").replace('"', "\\\"")
+    }
+
     #[test]
     fn computable_think_resolves_bindings() {
         // think should resolve bindings sequentially —
@@ -7660,7 +7664,7 @@ mod tests {
     #[test]
     fn persistence_save_restore_round_trip() {
         let tmp = std::env::temp_dir().join("anwe_test_persist.json");
-        let tmp_str = tmp.to_string_lossy().to_string();
+        let tmp_str = escape_anwe_string_literal(&tmp.to_string_lossy());
 
         // Build source using string replacement to avoid format! brace issues
         let save_src = r#"
@@ -7709,7 +7713,7 @@ mod tests {
     #[test]
     fn persistence_schema_version() {
         let tmp = std::env::temp_dir().join("anwe_test_schema.json");
-        let tmp_str = tmp.to_string_lossy().to_string();
+        let tmp_str = escape_anwe_string_literal(&tmp.to_string_lossy());
 
         // Build source with path string-replaced (no format! brace escaping needed)
         let src = "agent TestAgent\nlink TestAgent <-> TestAgent {\n    save TestAgent to \"PATH\" {}\n}"
@@ -7954,7 +7958,7 @@ mod tests {
     fn integration_persistence_round_trip() {
         // Exercises: save + restore with full state
         let tmp = std::env::temp_dir().join("anwe_integration_test.json");
-        let tmp_str = tmp.to_str().unwrap().to_string();
+        let tmp_str = escape_anwe_string_literal(tmp.to_str().unwrap());
 
         let source = r#"
             agent Memory data { knowledge: "deep learning"  version: 3 }
